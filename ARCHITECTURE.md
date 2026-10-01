@@ -1,0 +1,4 @@
+# Architecture
+One Android application module, io.evren.morsel. FeedPopupActivity owns a real floating window and Compose rendering. A ViewModel observes an application-scoped FeedCoordinator. Coordinator owns the non-queued submission guard and durable FeedJournal. PetlibroClient isolates the five cloud API operations; AuthManager refreshes only during reads. CredentialVault encrypts password-equivalent login material using Android Keystore. Settings and journal use DataStore in no-backup storage. Artwork observes state and never triggers network work.
+
+Offline tests use an injectable fake repository and MockWebServer. Demo behavior is explicit and labelled; it never shares real credentials, journals or device bindings. Release and emulator testing run in GitHub Actions; there is no application server.
