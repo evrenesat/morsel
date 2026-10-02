@@ -125,6 +125,7 @@ jobs:
             connected-logcat.txt
             connected-logcat-phase1.txt
             connected-logcat-phase1-stream.log
+            connected-logcat-phase1-stream2.log
             emulator-final.png
             instrument-*.log
             shots*.list

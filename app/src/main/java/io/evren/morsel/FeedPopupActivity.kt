@@ -39,14 +39,18 @@ class FeedPopupActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Outside taps only finish this activity if the window actually
-        // receives them. Activity.onTouchEvent -> Window.shouldCloseOnTouch
-        // acts on ACTION_OUTSIDE, but unlike dialogs nothing ever sets
-        // FLAG_WATCH_OUTSIDE_TOUCH on a floating ACTIVITY window — without it,
-        // windowCloseOnTouchOutside (theme) and setFinishOnTouchOutside stay
-        // inert. With the watch flag, a tap outside the card frame raises
-        // ACTION_OUTSIDE, the card finishes, and the dim layer keeps the tap
-        // off the launcher beneath.
+        // Outside-tap dismissal, as measured on CI emulators (run
+        // 36986559378): the floating window's INPUT surface extends beyond the
+        // visible card frame, so a tap beside the card is delivered to THIS
+        // window as a normal DOWN/UP (ACTION_OUTSIDE never fires — the window
+        // is its own touch target; FLAG_WATCH_OUTSIDE_TOUCH is set but inert).
+        // Dismissal is the platform's Window.shouldCloseOnTouch: on
+        // ACTION_OUTSIDE, or on ACTION_UP landing beyond the window-touch slop
+        // outside the decor bounds (the branch that actually fires here), it
+        // finishes the activity. The input surface covers the display, so the
+        // launcher beneath never receives the touch — the dimmed area absorbs
+        // outside taps, with a small within-slop dead margin at the card edge
+        // (same as dialog windows with a shadow margin).
         setFinishOnTouchOutside(true)
         window.setFlags(
             android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,

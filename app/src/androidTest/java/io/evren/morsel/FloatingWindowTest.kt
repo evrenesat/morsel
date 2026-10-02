@@ -73,10 +73,13 @@ class FloatingWindowTest {
     }
 
     /**
-     * The system-recorded frame of the morsel application window — the truth
-     * ACTION_OUTSIDE geometry is judged against. The accessibility ROOT bounds
-     * only describe the content inside the window; the frame can be larger by
-     * invisible margins (the transparent Box padding IS window surface).
+     * The system-recorded frame of the morsel application window: the visible
+     * card bounds that the platform's close-on-touch is judged against
+     * (Window.shouldCloseOnTouch measures the tap against the decor bounds).
+     * Measured equal to the accessibility root bounds on CI emulators — the
+     * surface that extends BEYOND this frame is the window's INPUT surface,
+     * which is why a tap beside the card still hits this window (and is never
+     * passed to the launcher beneath).
      */
     private fun morselWindowFrame(): android.graphics.Rect? {
         val windows = InstrumentationRegistry.getInstrumentation()
@@ -264,12 +267,15 @@ class FloatingWindowTest {
         val activity = launchAndWaitForCard()
 
         // Measure everything the tap geometry depends on BEFORE tapping. Run
-        // 36981516152 proved the previous 8px-left-of-root tap landed INSIDE
-        // the invisible window margin (the transparent Box padding is real
-        // window surface): input focus never left the card, so all three
-        // focus signals honestly kept reporting io.evren.morsel for 10s, and
-        // no ACTION_OUTSIDE ever existed. The dim itself works — pixel
-        // comparison of the same run's captures measured exactly 0.24.
+        // 36981516152 proved the previous 8px-left-of-root tap was swallowed:
+        // the floating window's INPUT surface extends beyond the visible frame,
+        // so that tap was delivered to THIS window 8px outside the decor —
+        // within the platform's window-touch slop, so Window.shouldCloseOnTouch
+        // (which fires on an UP beyond the slop, or on ACTION_OUTSIDE — the
+        // latter never happens here because the window is its own touch target)
+        // did not close the card, and every focus signal honestly kept
+        // reporting io.evren.morsel. The dim itself works — pixel comparison
+        // of the same run's captures measured exactly 0.24.
         val attrs = activity.window.attributes
         val decor = activity.window.decorView
         val location = IntArray(2)
@@ -289,9 +295,11 @@ class FloatingWindowTest {
         assertNotNull("morsel window frame not found: $report", frame)
         assertNotNull("morsel accessibility root not found: $report", root)
 
-        // Log every touch event the activity actually receives: if dismissal
-        // still fails, this is the ACTION_DOWN/ACTION_OUTSIDE delivery
-        // record that names the consumed link without another blind run.
+        // Log every touch event the activity actually receives: the delivery
+        // record that distinguishes a plain in-window DOWN/UP (the measured
+        // path — Window.shouldCloseOnTouch closes on the UP beyond the slop)
+        // from an ACTION_OUTSIDE, without another blind run if this ever
+        // regresses.
         val original = requireNotNull(activity.window.callback)
         lastDispatchReport = null
         activity.window.callback = object : Window.Callback by original {
