@@ -69,8 +69,10 @@ screenshot() {
 }
 
 # The logcat carries the MORSEL_SHOT screenshot mirror (see Screenshots.kt);
-# the default ~256KB buffer would rotate it away within seconds.
-adb logcat -G 8M || overall=1
+# the default ~256KB buffer would rotate it away within seconds, and even 8MB
+# can rotate during a long run, so go big and ALSO dump incrementally per
+# phase (the decoder deduplicates overlapping entries).
+adb logcat -G 16M || overall=1
 # Stale evidence from earlier runs on the same emulator must never mix in.
 adb shell rm -rf /data/local/tmp/morsel-screens || true
 
@@ -92,6 +94,9 @@ fi
 # them after its run.
 adb install -r "$APP_APK" || overall=1
 adb install -r "$TEST_APK" || overall=1
+
+# Snapshot the logcat now: phase 1's mirror entries must survive later phases.
+adb logcat -d > connected-logcat-phase1.txt || overall=1
 
 # Phase 2: visual evidence (opt-in, API 36 job). The Dutch locale, nonzero
 # selection and IME evidence come from instrumentation classes that ASSERT the
@@ -192,7 +197,9 @@ screenshot emulator-final.png || overall=1
 # for the gradle phase, whose APK is uninstalled and wiped afterwards); the
 # run-as pull covers anything that only exists after a later reinstall.
 mkdir -p morsel-screens
-python3 - <<'PYEOF' || overall=1
+for name in connected-logcat.txt connected-logcat-phase1.txt; do
+    [ -f "$name" ] || continue
+    python3 - "$name" <<'PYEOF' || overall=1
 import base64
 import pathlib
 import re
@@ -201,8 +208,7 @@ import sys
 shots = {}
 begin = re.compile(r"BEGIN:([A-Za-z0-9._-]+):(\d+)$")
 chunk = re.compile(r"CHUNK:([A-Za-z0-9._-]+):(\d+):([A-Za-z0-9+/=]+)$")
-end = re.compile(r"END:([A-Za-z0-9._-]+)$")
-for line in open("connected-logcat.txt", encoding="utf-8", errors="replace"):
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
     if "MORSEL_SHOT:" not in line:
         continue
     body = line.split("MORSEL_SHOT:", 1)[1].strip()
@@ -219,20 +225,25 @@ out = pathlib.Path("morsel-screens")
 written = 0
 incomplete = 0
 for name, parts in shots.items():
+    target = out / f"{name}.png"
     if not parts or any(p == "" for p in parts):
-        incomplete += 1
-        print(f"FAIL: incomplete logcat mirror for {name}", file=sys.stderr)
+        if not target.exists():
+            incomplete += 1
+            print(f"FAIL: incomplete logcat mirror for {name}", file=sys.stderr)
         continue
-    (out / f"{name}.png").write_bytes(base64.b64decode("".join(parts)))
+    data = base64.b64decode("".join(parts))
+    if not target.exists() or target.stat().st_size != len(data):
+        target.write_bytes(data)
     written += 1
-print(f"logcat mirror: {written} screenshot(s) decoded, {incomplete} incomplete")
+print(f"logcat mirror [{sys.argv[1]}]: {written} complete, {incomplete} new incomplete")
 if incomplete:
     sys.exit(1)
 if not shots:
-    print("FAIL: no MORSEL_SHOT mirror entries found in logcat", file=sys.stderr)
+    print(f"FAIL: no MORSEL_SHOT mirror entries in {sys.argv[1]}", file=sys.stderr)
     sys.exit(1)
 sys.exit(0)
 PYEOF
+done
 if adb shell run-as io.evren.morsel ls files/morsel-screens > shots.list 2> shots-err.txt; then
     tr -d '\r' < shots.list | while IFS= read -r f; do
         [ -n "$f" ] || continue

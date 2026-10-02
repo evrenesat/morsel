@@ -11,7 +11,7 @@ local.properties
 .env
 captures/
 app/build/outputs/
-connected-logcat.txt
+connected-logcat*.txt
 emulator-final.png
 instrument-*.log
 shots*.txt

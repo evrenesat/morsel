@@ -95,6 +95,16 @@ class AppGraph(context: MorselApplication, scope: CoroutineScope) : MorselGraph 
                 demoScenario = io.evren.morsel.demo.DemoScenario.valueOf(it.demoScenario)
             }
         }
+        scope.launch {
+            // Mode flags only (no content): makes instrumentation failures
+            // diagnosable from logcat without exposing any account data.
+            settingsStore.settings.collect {
+                android.util.Log.i(
+                    "MorselSettings",
+                    "demo=${it.demoMode} onboard=${it.onboardingComplete} scenario=${it.demoScenario}",
+                )
+            }
+        }
         scope.launch { realCoordinator.restore() }
         scope.launch { demoCoordinator.restore() }
     }

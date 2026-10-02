@@ -4,12 +4,13 @@ APK releases are built and signed only by the GitHub Actions `Release` workflow 
 
 ## Pipeline
 
-1. **Gates job** — the full check suite (`spotlessCheck lintDebug testDebugUnitTest assembleDebug`) must pass on the exact tagged commit. Signing never starts on a failing commit.
+1. **Gates job** — the full CI workflow (`workflow_call`: static checks, unit tests, API 30 + API 36 emulator suites) must pass on the exact tagged commit. Signing never starts on a failing commit.
 2. **Release job** (only for `evrenesat/morsel`, `contents: write`) —
    - decodes `MORSEL_KEYSTORE_BASE64` into `$RUNNER_TEMP` (never the workspace), `chmod 600`;
    - runs `assembleRelease` with `MORSEL_STORE_PASSWORD`, `MORSEL_KEY_ALIAS`, `MORSEL_KEY_PASSWORD` from repository secrets; Gradle reads them from the environment (`app/build.gradle.kts`), so local builds stay unsigned;
    - verifies the APK's signing certificate SHA-256 equals `MORSEL_CERT_SHA256` (uppercase hex, no colons) before anything is published;
    - writes `SHA256SUMS`, removes the key file from the runner (`if: always()`), then publishes the APK + checksums as a prerelease via `gh release`. Any earlier step failure aborts the job before publishing.
+3. **Post-publication health check** — downloads the exact published APK and `SHA256SUMS`, re-verifies checksum, certificate and package identity, then installs and launches the published APK in a fresh GitHub-hosted emulator (`scripts/release-health-check.sh`; setup/demo only, no account) and uploads the evidence. A failed check fails the workflow visibly; the release stays a prerelease until the owner validates it.
 
 Fork PRs never see signing secrets: the release workflow has no `pull_request` trigger and the publish job is repository-gated.
 

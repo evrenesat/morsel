@@ -116,7 +116,10 @@ abstract class DemoFlowBase(private val scenario: DemoScenario, private val labe
                 // Explicit acknowledgement explains duplicate risk before a fresh feed.
                 compose.onNodeWithTag(Tags.ACK).performClick()
                 compose.onNodeWithText(context.getString(R.string.ack_dialog_confirm)).performClick()
-                compose.waitUntil(5_000) {
+                // The retirement writes the journal synchronously, but the
+                // emulator under test can be busy; grant the recomposition the
+                // same latency budget as the other waits.
+                compose.waitUntil(10_000) {
                     compose.onAllNodesWithTag(Tags.FEED).fetchSemanticsNodes().isNotEmpty()
                 }
                 compose.onNodeWithTag(Tags.FEED).assertIsEnabled()

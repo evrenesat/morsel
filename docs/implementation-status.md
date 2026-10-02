@@ -2,42 +2,53 @@
 
 Worker: ZCode GLM-5.3-Flash on p100 (authorized). One implementation worker; supervising Codex chat reviews.
 
-## Current state (after checkpoint-3 corrections, commit a8f9971)
+## Current state (after visual-acceptance fixes, commits b474f43..49f05fa)
 
-All four review findings to date are fixed with regression tests; CI is green on the last reviewed commit.
+All review findings to date are fixed with regression tests. Emulator evidence (per-test screenshots, phase logs) is preserved and uploaded on every run; the last commits are awaiting the next full CI matrix and supervisor review.
 
-| Checkpoint | Commit | CI |
+| Checkpoint / review | Commit | CI |
 |---|---|---|
 | Bootstrap (floating card, CI, contract docs) | a884040 | superseded |
-| Domain/data with fault gates (59 JVM tests) | 80f5d4d | superseded |
-| Full UI, art, EN/NL, accessibility, demo scenarios | b9ba545 | [36951136153](https://github.com/evrenesat/morsel/actions/runs/36951136153) green |
-| Checkpoint-2 storage fixes (DataStore extensions, trimming) | 67269e1 | [36951827220](https://github.com/evrenesat/morsel/actions/runs/36951827220) FAILED (scope-restart test bug) |
+| Domain/data with fault gates (JVM tests) | 80f5d4d | superseded |
+| Full UI, art, EN/NL, accessibility, demo scenarios | b9ba545 | [36951136153](https://github.com/evrenesat/morsel/actions/runs/36951136153) green (pre-emulator era) |
+| Checkpoint-2 storage fixes (DataStore extensions, trimming) | 67269e1 | FAILED (scope-restart test bug, fixed) |
 | Fail-closed journal + storage-error gate | efc898d | [36955392704](https://github.com/evrenesat/morsel/actions/runs/36955392704) green, 77 unit tests |
-| Checkpoint-3 fixes + instrumented suite | a8f9971 | recorded below after completion |
+| Checkpoint-3 fixes + instrumented suite | a8f9971 | recorded below |
+| Emulator CI + release workflow + verify script | 1ead6ac..cedc886 | [36957103405](https://github.com/evrenesat/morsel/actions/runs/36957103405) falsely green — never trust job color alone |
+| Real emulator gates + evidence pipeline | 2ceef07 | [36959990525](https://github.com/evrenesat/morsel/actions/runs/36959990525) FAILED 6/17 both APIs |
+| Ack leaves unresolved UI; adb-driven restart phases | b474f43 | [36962065566](https://github.com/evrenesat/morsel/actions/runs/36962065566) FAILED 2/17 both APIs |
+| Durable ack retires operation; evidence survives uninstall | eb3ed13 | [36965758511](https://github.com/evrenesat/morsel/actions/runs/36965758511) FAILED 3/17 both APIs (evidence pipeline still lossy) |
+| Visual P2s (scene height, counter, Dutch) + watch flag + logcat mirror | ca3a548 | [36967722345](https://github.com/evrenesat/morsel/actions/runs/36967722345) FAILED 2/17 API36, 3/17 API30 — screenshots pinpointed every remaining race |
+| Race fixes from on-device evidence | 49f05fa | this run |
 
-## Review fixes applied
+## What the on-device evidence changed (commit 49f05fa)
 
-- **Checkpoint-2 (plans/review-checkpoint2.md)** — DataStore filenames end `.preferences_pb` (P1); trimming counts acknowledged entries as resolved and preserves genuinely unresolved ones (P2); zero-selection acceptance (fresh session starts at 0, empty cup, Feed disabled until plus) implemented and unit-tested (b9ba545/67269e1).
-- **CI 36951827220 root cause** — a new DataStore must not open a file until the previous store's scope is fully joined; tests now `cancelAndJoin` before reopening (efc898d). Regression kept.
-- **Journal corruption fail-closed (supervisor recovery prompt)** — removed `ReplaceFileCorruptionHandler`; undecodable payloads throw `JournalReadException` on read and refuse writes instead of silently resetting to empty state. `FeedCoordinator.restore` latches `storageError`; `submit` returns `Blocked(STORAGE_ERROR)` before any preflight traffic (asserted: zero transport calls). Card shows a clear EN/NL status with no Feed button (efc898d).
-- **Checkpoint-3 (plans/review-checkpoint3.md)** — blocked pre-send outcomes (offline, serial missing, wrong model, no binding, preflight failed, journal write failed) now show localized EN/NL notices saying nothing was sent; `checkStatus` READ_FAILED keeps the unresolved operation visible and explains itself; stale notices clear on a fresh attempt/acknowledgement. Caller cancellation after the durable dispatch records UNKNOWN via one bounded non-cancellable journal write and stays blocking; never retried, resolved outcomes never overwritten (a8f9971).
+Failure screenshots decoded from the run-36967722345 logcat mirror identified each remaining defect precisely; none were guesswork:
 
-## Test evidence (local, p100: JDK 17.0.x, SDK 36)
+- **Acknowledgement retirement (fixed in eb3ed13, hardened in 49f05fa).** Acknowledging now retires the operation only after the journal records it: polling for that operation is cancelled, `unresolvedOperation` clears, `lastResolved` keeps the acknowledged entry. DemoUnconfirmedFlowTest passed on API 36 in run 36967722345 after this change. API 30 additionally hit a race where a poll tick reconciled the acknowledged operation and `persistOutcome` overwrote the resolution with success (failure screenshot shows the success panel); `persistOutcome` now refuses to rewrite a retired operation (memory + journal), and the poll loop re-checks its guard after the suspending history read. Demo prepare helpers now fail loudly if the scripted scenario never lands.
+- **Floating window outside tap.** `Activity.onTouchEvent` → `Window.shouldCloseOnTouch` acts on `ACTION_OUTSIDE`, but nothing sets `FLAG_WATCH_OUTSIDE_TOUCH` on a floating activity window (dialogs set it themselves), so the theme attribute and `setFinishOnTouchOutside` alone are inert. The card sets the flag explicitly. Separately, the tests read the window bounds while the wrapping window was still composing (a click landed at (28,80)); they now wait for the window to reach card size first.
+- **In-flight dismissal/reopen.** The rewritten test holds the single write on a test-only gate (`DemoFeederRepository.SendGate`), dismisses mid-request, waits for the coordinator's durable UNKNOWN (asserted), reopens in the same process, asserts the UNKNOWN panel with check-status and acknowledgement available, and continuously asserts exactly one send attempt (no replay). The earlier version passed without ever exercising cancellation.
+- **Evidence pipeline.** Every capture is mirrored into the logcat (`MORSEL_SHOT` base64 chunks; `executeShellCommand` cannot do shell redirects, so the previous /data/local/tmp mirror silently produced nothing). `scripts/ci-emulator.sh` decodes the stream, fails on missing/incomplete shots, verifies the card owns the foreground before each host screenshot, creates the host-shot directory on both APIs, and uploads `instrument-*.log` phase logs.
+- **Visual acceptance (plans/review-visual.md).** Cat/cup canvases had no intrinsic height and collapsed; `SceneArea` now gives them a definite bounded height (reduced on short layouts). The counter is numeric-only at large font with the localized plural on a full-width line and a full content description. Dutch evidence comes from `DutchVisualTest` via per-app `LocaleManager` asserting Dutch strings on screen before capture (the `cmd locale` shell switch never applied to the app). `SelectionVisualTest` captures nonzero kibble; `ImeVisualTest` captures the setup card with the IME raised and after Back-dismiss.
+
+## Test evidence (local, p100: JDK 17, SDK 36)
 
 ```
 ./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug assembleDebugAndroidTest
-BUILD SUCCESSFUL; unit tests: 85 completed, 0 failed (a8f9971)
+BUILD SUCCESSFUL; unit tests: 87 completed, 0 failed (49f05fa)
+shellcheck scripts/*.sh: clean
 ```
 
-Unit gates cover every fault path in plans/implementation.md including exact HTTP call counts; instrumented suite (production DataStore/Keystore/floating window/demo flows/failure text) compiles and runs in CI emulator jobs below.
+Unit gates cover every fault path in plans/implementation.md including exact HTTP call counts; instrumented tests run in CI emulator jobs (see table).
 
-## CI pipeline (this commit)
+## CI pipeline
 
-- `ci.yml`: static job (formatting, lint, unit tests, debug build) plus **emulator jobs on API 30 and API 36** (`reactivecircus/android-emulator-runner@v2`, KVM perms, no-window) running `connectedDebugAndroidTest`; XML/HTML reports, screenshots and sanitized logcat uploaded even on failure.
-- `release.yml` (not yet exercised — publishing awaits supervisor review): gates → signed `assembleRelease` using repository secrets `MORSEL_KEYSTORE_BASE64`, `MORSEL_STORE_PASSWORD`, `MORSEL_KEY_ALIAS`, `MORSEL_KEY_PASSWORD`, `MORSEL_CERT_SHA256`; keystore materialized only in runner temp and removed after; certificate pinned against `MORSEL_CERT_SHA256` before publishing; APK + `SHA256SUMS` attached as prerelease on `v*` tags; `scripts/verify-apk.sh` verifies package identity and certificate.
+- `ci.yml`: static job plus emulator jobs on API 30 and API 36. One script (`scripts/ci-emulator.sh`) owns test status and evidence collection: Gradle suite (process-death pair and visual-only classes excluded, they run as direct `adb shell am instrument` phases), then visual phases (API 36: seed, IME, selection, Dutch with on-screen assertions, plus host shots for light/dark/2x-font/reduced-motion), then a real force-stop/relaunch process-death phase judged by `am instrument`'s own OK summary. Screenshots, XML/HTML reports, logcat and phase logs upload even on failure.
+- `release.yml`: full CI gates via `workflow_call` on the exact tag → signed `assembleRelease` (secrets only, key materialized in runner temp and removed) → certificate pinned against `MORSEL_CERT_SHA256` → APK + `SHA256SUMS` prerelease → post-publication emulator job installs the published APK and runs `scripts/release-health-check.sh`. Publishing awaits supervisor review; no tag has been cut.
 
 ## Explicitly NOT done (truth)
 
 - Real Petlibro account, shared-account acceptance, physical dispensing, Galaxy S21/One UI behavior: NOT TESTED. No live API traffic has been generated.
-- No APK release published yet; per instruction the signed release waits for supervisor review (release workflow merged but unexercised).
-- Emulator CI results for a8f9971: recorded here with exact run links and numbers once the first emulator run completes.
+- No APK release published; the signed release waits for supervisor review (workflow merged, unexercised).
+- IME screenshots assert the keyboard state via `dumpsys input_method`; the capture-timing fix (drawing settle) has not yet been through a CI run.
+- Landscape and IME evidence exists as in-app screenshots; physical-device layout review is the supervisor's.

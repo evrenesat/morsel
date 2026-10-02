@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -33,6 +34,32 @@ class FloatingWindowTest {
         get() = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
 
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @After
+    fun leaveNoCardBehind() {
+        // A failed body must not leave the card stacked over the next class's
+        // activity: every test in this class starts and ends on the launcher.
+        runCatching { device.pressHome() }
+    }
+
+    /**
+     * The application window's real frame, from the accessibility window list
+     * — deterministic, unlike the accessibility node tree, where a By.pkg
+     * match can land on a small text node instead of the window root.
+     */
+    private fun morselWindowBounds(): android.graphics.Rect? {
+        val windows = InstrumentationRegistry.getInstrumentation()
+            .uiAutomation.windows.orEmpty()
+            .filter {
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                    it.root?.packageName?.toString() == "io.evren.morsel"
+            }
+        val window = windows.firstOrNull { it.isFocused } ?: windows.firstOrNull() ?: return null
+        val root = window.root ?: return null
+        val bounds = android.graphics.Rect()
+        root.getBoundsInScreen(bounds)
+        return bounds
+    }
 
     /** Package of the focused application window right now (the launcher after Home). */
     private fun foregroundApplicationPackage(): String? {
@@ -67,16 +94,16 @@ class FloatingWindowTest {
         // layout (an earlier run tapped (28,80) against a near-empty window).
         // Wait until the window has its real card-sized frame.
         val deadline = System.currentTimeMillis() + 10_000
-        var bounds = device.findObject(By.pkg("io.evren.morsel")).visibleBounds
-        while (bounds.height() < device.displayHeight / 4 &&
+        var bounds = morselWindowBounds()
+        while ((bounds == null || bounds.height() < device.displayHeight / 4) &&
             System.currentTimeMillis() < deadline
         ) {
             Thread.sleep(200)
-            bounds = device.findObject(By.pkg("io.evren.morsel")).visibleBounds
+            bounds = morselWindowBounds()
         }
         assertTrue(
             "card window never reached card size (bounds=$bounds)",
-            bounds.height() >= device.displayHeight / 4,
+            bounds != null && bounds.height() >= device.displayHeight / 4,
         )
     }
 
@@ -98,11 +125,10 @@ class FloatingWindowTest {
     fun floatingCardIsSmallerThanDisplayOverHome() {
         val homePackage = goHomeAndWait()
         launchAndWaitForCard()
-        val window = device.findObject(By.pkg("io.evren.morsel"))
-        assertNotNull("Morsel window not found", window)
-        val bounds = window.visibleBounds
+        val bounds = morselWindowBounds()
+        assertNotNull("Morsel window not found", bounds)
         assertTrue(
-            "card width ${bounds.width()} should be smaller than display ${device.displayWidth}",
+            "card width ${bounds!!.width()} should be smaller than display ${device.displayWidth}",
             bounds.width() in 1 until device.displayWidth,
         )
         assertTrue(
@@ -110,7 +136,7 @@ class FloatingWindowTest {
             bounds.height() in 1 until device.displayHeight,
         )
         // Layering over the home screen is proven behaviorally by the
-        // dismiss-back-to-home tests below and visually by the screenshot
+        // dismiss-back-home tests below and visually by the screenshot
         // (accessibility window lists hide occluded windows on newer APIs).
         Screenshots.capture("floating-over-home")
         device.pressBack()
@@ -139,7 +165,6 @@ class FloatingWindowTest {
         // journal survive the dismissed card untouched.
         launchAndWaitForCard()
         assertEquals(pidBefore, android.os.Process.myPid())
-        assertNotNull(device.findObject(By.pkg("io.evren.morsel")))
         Screenshots.capture("reopened-same-process")
         device.pressBack()
     }
@@ -148,10 +173,11 @@ class FloatingWindowTest {
     fun outsideTapDismissesWithoutTouchingWhatIsBeneath() {
         val homePackage = goHomeAndWait()
         launchAndWaitForCard()
-        // Click just LEFT of the actual card bounds at mid height: (0,0) sits
-        // in the status bar and would pull down the notification shade instead.
-        val bounds = device.findObject(By.pkg("io.evren.morsel")).visibleBounds
-        val x = (bounds.left - 8).coerceAtLeast(0)
+        // Click just LEFT of the actual card window at mid height: (0,0) sits
+        // in the status bar and would pull down the notification shade.
+        val bounds = morselWindowBounds()
+        assertNotNull("Morsel window not found", bounds)
+        val x = (bounds!!.left - 8).coerceAtLeast(0)
         val y = bounds.centerY().coerceIn(0, device.displayHeight - 1)
         device.click(x, y)
         assertTrue(

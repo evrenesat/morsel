@@ -21,6 +21,7 @@ import io.evren.morsel.domain.FeedState
 import io.evren.morsel.ui.SetupTags
 import io.evren.morsel.ui.Tags
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -148,6 +149,11 @@ class InFlightDismissReopenTest {
         // Reopen in the SAME process: the application-scoped coordinator still
         // holds the conservative UNKNOWN and nothing was resent.
         val pidBefore = android.os.Process.myPid()
+        // The card must reopen in demo mode; a flipped mode would silently
+        // show the real (empty) card and fail confusingly.
+        check(runBlocking { graph.settingsStore.settings.first().demoMode }) {
+            "demo mode was disabled mid-test"
+        }
         context.startActivity(
             Intent(context, FeedPopupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
