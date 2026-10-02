@@ -13,11 +13,17 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import io.evren.morsel.demo.DemoFeederRepository
 import io.evren.morsel.demo.DemoScenario
 import io.evren.morsel.domain.FeedOperation
 import io.evren.morsel.domain.FeedState
+import io.evren.morsel.ui.SetupTags
 import io.evren.morsel.ui.Tags
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -61,10 +67,12 @@ class VisualSetupTest {
 }
 
 /**
- * Checkpoint review gate: a request left in flight when the card is dismissed
- * stays visible and blocking after reopening IN THE SAME PROCESS. The demo
- * TIMEOUT_UNKNOWN scenario drives the production coordinator (transport is
- * scripted; no real feeder and no network).
+ * Checkpoint review gate: a request left PENDING when the card is dismissed
+ * stays visible and blocking after reopening IN THE SAME PROCESS — and is
+ * never replayed. The demo TIMEOUT_UNKNOWN scenario drives the production
+ * coordinator; a test-only gate holds the single write mid-flight so dismissal
+ * happens BEFORE any outcome exists (transport is scripted; no real feeder and
+ * no network).
  */
 @RunWith(AndroidJUnit4::class)
 class InFlightDismissReopenTest {
@@ -81,37 +89,128 @@ class InFlightDismissReopenTest {
     private val context
         get() = InstrumentationRegistry.getInstrumentation().targetContext
 
+    private val graph: AppGraph
+        get() = (context.applicationContext as MorselApplication).graph
+
     @Before
-    fun prepare() = prepareDemo(
-        (context.applicationContext as MorselApplication).graph,
-        DemoScenario.TIMEOUT_UNKNOWN,
-    )
+    fun prepare() {
+        // Fresh gate for this test; leftover unresolved state from earlier
+        // classes is retired exactly like the demo flows do.
+        graph.demoRepository.sendGate = null
+        prepareDemo(graph, DemoScenario.TIMEOUT_UNKNOWN)
+    }
 
     @Test
     fun dismissedInFlightRequestIsStillBlockingAfterReopen() {
-        val graph = context.applicationContext as MorselApplication
+        val attemptsBefore = graph.demoRepository.sendAttempts.get()
+
         compose.onNodeWithTag(Tags.PLUS).performClick()
         compose.onNodeWithTag(Tags.PLUS).performClick()
+
+        // Hold the single write mid-flight, before any scripted outcome.
+        graph.demoRepository.sendGate =
+            DemoFeederRepository.SendGate { _, _, _ -> awaitCancellation() }
         compose.onNodeWithTag(Tags.FEED).assertIsEnabled().performClick()
 
-        // The scripted timeout resolves to UNKNOWN: unresolved actions appear.
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithTag(Tags.CHECK_STATUS).fetchSemanticsNodes().isNotEmpty()
+        // The request reached the transport and is pending: exactly one attempt.
+        val reachedDeadline = System.currentTimeMillis() + 10_000
+        while (graph.demoRepository.sendAttempts.get() == attemptsBefore &&
+            System.currentTimeMillis() < reachedDeadline
+        ) {
+            Thread.sleep(25)
         }
-        val unknown = context.getString(R.string.unknown_body)
+        assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
 
-        // Card dismissal while the outcome is unresolved.
+        // Dismiss the card WHILE the request is still pending. The submitting
+        // scope dies with the card; the coordinator records UNKNOWN durably.
         device.pressBack()
 
         // Reopen in the SAME process: the application-scoped coordinator still
-        // holds the unresolved operation; nothing was resent.
+        // holds the conservative UNKNOWN and nothing was resent.
         val pidBefore = android.os.Process.myPid()
         context.startActivity(
             Intent(context, FeedPopupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-        org.junit.Assert.assertNotNull(device.wait(Until.hasObject(By.text(unknown)), 10_000))
-        org.junit.Assert.assertEquals(pidBefore, android.os.Process.myPid())
+        val unknown = context.getString(R.string.unknown_body)
+        assertNotNull(device.wait(Until.hasObject(By.text(unknown)), 10_000))
+        assertEquals(pidBefore, android.os.Process.myPid())
+        // Check status AND acknowledgement stay available for this outcome.
+        val ackAvailable = context.getString(R.string.i_checked_the_feeder)
+        assertNotNull(device.wait(Until.hasObject(By.text(ackAvailable)), 5_000))
+
+        // A user status check reconciles read-only; no second request may
+        // appear while it runs or after it.
+        val checkStatus = context.getString(R.string.check_status)
+        assertNotNull(device.wait(Until.hasObject(By.text(checkStatus)), 5_000))
+        device.findObject(By.text(checkStatus)).click()
+        val quietDeadline = System.currentTimeMillis() + 2_000
+        while (System.currentTimeMillis() < quietDeadline) {
+            assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
+            Thread.sleep(50)
+        }
+        assertNotNull(device.wait(Until.hasObject(By.text(unknown)), 5_000))
+        assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
         Screenshots.capture("inflight-dismiss-reopen")
+    }
+}
+
+/**
+ * Visual evidence: the setup sign-in form raises a real IME over the floating
+ * card, Back dismisses the keyboard (not the card), and the form stays usable.
+ * Runs only in the API 36 visual phase (see scripts/ci-emulator.sh).
+ */
+@RunWith(AndroidJUnit4::class)
+class ImeVisualTest {
+
+    @get:Rule
+    val compose = createAndroidComposeRule<FeedPopupActivity>()
+
+    @get:Rule
+    val failureScreenshot = FailureScreenshotRule()
+
+    private val device: UiDevice
+        get() = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+
+    private val context
+        get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    /** True while the system reports the IME as shown. */
+    private fun imeShown(): Boolean = device.executeShellCommand("dumpsys input_method").contains("mInputShown=true")
+
+    private fun awaitIme(visible: Boolean, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (imeShown() == visible) return true
+            Thread.sleep(250)
+        }
+        return imeShown() == visible
+    }
+
+    @Test
+    fun setupEmailFieldRaisesUsableIme() {
+        // Leave demo mode: the setup welcome card holds the sign-in form.
+        runBlocking {
+            (context.applicationContext as MorselApplication).graph.settingsStore.let {
+                it.setOnboardingComplete(false)
+                it.setDemoMode(false)
+            }
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag(SetupTags.SIGN_IN).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag(SetupTags.SIGN_IN).performClick()
+        compose.onNodeWithTag(SetupTags.EMAIL).performClick()
+
+        assertTrue("IME did not become visible over the setup card", awaitIme(true, 10_000))
+        Screenshots.capture("ime-setup-card")
+
+        // Back dismisses the keyboard first; the form itself stays on screen.
+        device.pressBack()
+        assertTrue("IME did not dismiss on Back", awaitIme(false, 10_000))
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag(SetupTags.EMAIL).fetchSemanticsNodes().isNotEmpty()
+        }
+        Screenshots.capture("ime-dismissed-form")
     }
 }
 

@@ -2,9 +2,12 @@
 # CI emulator driver for Morsel.
 #
 # Phase 1: full instrumented suite via gradle (AGP uninstalls the app
-#          afterwards, so nothing after this phase may assume gradle state).
-# Phase 2: visual evidence (light/dark/large-font/Dutch/reduced-motion) via
-#          adb, on a demo-mode card.
+#          afterwards, so nothing after this phase may assume gradle state;
+#          in-app screenshots survive via the /data/local/tmp mirror that
+#          Screenshots.kt writes during every capture).
+# Phase 2: visual evidence (light/dark/large-font/Dutch/IME/reduced-motion)
+#          via adb, on a demo-mode card. Setup failures fail the phase —
+#          screenshots of the launcher are never accepted as evidence.
 # Phases 3-5: process death — seed a persisted pending operation through the
 #          app's own journal, force-stop the app, relaunch it, and verify in
 #          the fresh process that the restored UNKNOWN state blocks resending.
@@ -41,15 +44,42 @@ run_class() {
     return 0
 }
 
-# Phase 1: full suite (process-death pair and visual seed run in their own
-# phases below so a real restart is never masked by a gradle reinstall).
+# The Morsel card must own the foreground before any screenshot is evidence;
+# a capture of the launcher means a setup step failed and is reported as such.
+wait_morsel_foreground() {
+    for _ in $(seq 1 30); do
+        if adb shell dumpsys window 2>/dev/null | tr -d '\r' | grep -q "mCurrentFocus=.*io\.evren\.morsel"; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    echo "FAIL: io.evren.morsel never reached the foreground" >&2
+    return 1
+}
+
+# A screenshot that produced no data must never pass as evidence.
+screenshot() {
+    local out="$1"
+    adb exec-out screencap -p > "$out"
+    if [ ! -s "$out" ]; then
+        echo "FAIL: screencap produced no data for $out" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Stale evidence from earlier runs on the same emulator must never mix in.
+adb shell rm -rf /data/local/tmp/morsel-screens || overall=1
+
+# Phase 1: full suite (process-death pair, visual seed and IME run in their
+# own phases below so a real restart is never masked by a gradle reinstall).
 if [ -n "${MORSEL_TEST_CMD:-}" ]; then
     if ! bash -c "$MORSEL_TEST_CMD"; then
         overall=1
     fi
 else
     if ! ./gradlew --no-daemon connectedDebugAndroidTest \
-        -Pandroid.testInstrumentationRunnerArguments.notClass=io.evren.morsel.ProcessDeathVerifyTest,io.evren.morsel.ProcessDeathSetupTest,io.evren.morsel.VisualSetupTest; then
+        -Pandroid.testInstrumentationRunnerArguments.notClass=io.evren.morsel.ProcessDeathVerifyTest,io.evren.morsel.ProcessDeathSetupTest,io.evren.morsel.VisualSetupTest,io.evren.morsel.ImeVisualTest; then
         overall=1
     fi
 fi
@@ -62,45 +92,90 @@ adb install -r "$TEST_APK" || overall=1
 # Phase 2: visual evidence on a demo-mode card (opt-in, API 36 job).
 if [ "${MORSEL_VISUAL:-0}" = "1" ]; then
     mkdir -p morsel-screens-host
-    shot() {
-        adb exec-out screencap -p > "morsel-screens-host/$1.png" || true
-    }
-    if run_class io.evren.morsel.VisualSetupTest instrument-visual.log; then
-        adb shell am force-stop io.evren.morsel || true
-        adb shell am start -n io.evren.morsel/.FeedPopupActivity || true
-        sleep 3
-        shot light-card
-        adb shell cmd uimode night yes || true
-        sleep 2
-        shot dark-card
-        adb shell cmd uimode night no || true
-        sleep 2
-        adb shell settings put system font_scale 2.0 || true
-        sleep 2
-        shot large-font-card
-        adb shell settings put system font_scale 1.0 || true
-        sleep 2
-        adb shell settings put global animator_duration_scale 0 || true
-        sleep 1
-        shot reduced-motion-card
-        adb shell settings put global animator_duration_scale 1.0 || true
-        adb shell cmd locale set-locales nl-NL || true
-        sleep 3
-        shot dutch-card
-        adb shell cmd locale set-locales en-US || true
-        sleep 1
-    else
+    visual_ok=1
+    if ! run_class io.evren.morsel.VisualSetupTest instrument-visual.log; then
+        visual_ok=0
+    fi
+    if ! run_class io.evren.morsel.ImeVisualTest instrument-ime.log; then
+        visual_ok=0
+    fi
+
+    if ! adb shell am start -n io.evren.morsel/.FeedPopupActivity; then
+        echo "FAIL: am start for the visual block" >&2
+        visual_ok=0
+    fi
+    if ! wait_morsel_foreground; then
+        visual_ok=0
+    fi
+
+    screenshot morsel-screens-host/light-card.png || visual_ok=0
+
+    if ! adb shell cmd uimode night yes; then
+        echo "FAIL: could not switch to dark mode" >&2
+        visual_ok=0
+    fi
+    sleep 2
+    wait_morsel_foreground || visual_ok=0
+    screenshot morsel-screens-host/dark-card.png || visual_ok=0
+
+    if ! adb shell cmd uimode night no; then
+        echo "FAIL: could not switch back to light mode" >&2
+        visual_ok=0
+    fi
+    if ! adb shell settings put system font_scale 2.0; then
+        echo "FAIL: could not set 2x font scale" >&2
+        visual_ok=0
+    fi
+    sleep 2
+    wait_morsel_foreground || visual_ok=0
+    screenshot morsel-screens-host/large-font-card.png || visual_ok=0
+
+    if ! adb shell settings put system font_scale 1.0; then
+        echo "FAIL: could not reset font scale" >&2
+        visual_ok=0
+    fi
+    if ! adb shell settings put global animator_duration_scale 0; then
+        echo "FAIL: could not disable animations" >&2
+        visual_ok=0
+    fi
+    sleep 1
+    wait_morsel_foreground || visual_ok=0
+    screenshot morsel-screens-host/reduced-motion-card.png || visual_ok=0
+    if ! adb shell settings put global animator_duration_scale 1.0; then
+        echo "FAIL: could not re-enable animations" >&2
+        visual_ok=0
+    fi
+
+    if ! adb shell cmd locale set-locales nl-NL; then
+        echo "FAIL: could not switch to Dutch locale" >&2
+        visual_ok=0
+    fi
+    sleep 3
+    wait_morsel_foreground || visual_ok=0
+    screenshot morsel-screens-host/dutch-card.png || visual_ok=0
+    if ! adb shell cmd locale set-locales en-US; then
+        echo "FAIL: could not restore the en-US locale" >&2
+        visual_ok=0
+    fi
+    sleep 1
+    if [ "$visual_ok" = "0" ]; then
         overall=1
     fi
 fi
 
 # Phases 3-5: process death with a REAL restart.
 if run_class io.evren.morsel.ProcessDeathSetupTest instrument-setup.log; then
-    adb shell am force-stop io.evren.morsel || true
-    adb shell am start -n io.evren.morsel/.FeedPopupActivity || true
+    if ! adb shell am force-stop io.evren.morsel; then
+        echo "FAIL: could not force-stop the app" >&2
+        overall=1
+    fi
+    if ! adb shell am start -n io.evren.morsel/.FeedPopupActivity; then
+        echo "FAIL: could not relaunch the app after force-stop" >&2
+        overall=1
+    fi
     sleep 3
-    adb exec-out screencap -p > morsel-screens-host/process-death-relaunch.png 2>/dev/null ||
-        true
+    wait_morsel_foreground || overall=1
+    screenshot morsel-screens-host/process-death-relaunch.png || overall=1
     if ! run_class io.evren.morsel.ProcessDeathVerifyTest instrument-verify.log; then
         overall=1
     fi
@@ -109,19 +184,30 @@ else
 fi
 
 # Evidence collection (always; never masks the test result).
-adb logcat -d > connected-logcat.txt || true
-adb exec-out screencap -p > emulator-final.png || true
+adb logcat -d > connected-logcat.txt || overall=1
+screenshot emulator-final.png || overall=1
 
-# In-app screenshots (success and failure captures, see Screenshots.kt) live
-# in the app's internal files dir; pull them file-by-file with run-as.
+# In-app screenshots (success and failure captures, see Screenshots.kt): the
+# /data/local/tmp mirror survives Gradle's uninstall, and run-as covers any
+# capture that only exists after a later reinstall.
 mkdir -p morsel-screens
+if adb shell test -d /data/local/tmp/morsel-screens; then
+    if ! adb pull /data/local/tmp/morsel-screens/. morsel-screens/ > /dev/null; then
+        echo "FAIL: could not pull the screenshot mirror" >&2
+        overall=1
+    fi
+else
+    echo "note: no /data/local/tmp screenshot mirror was created" >&2
+fi
 if adb shell run-as io.evren.morsel ls files/morsel-screens > shots.list 2> shots-err.txt; then
     tr -d '\r' < shots.list | while IFS= read -r f; do
         [ -n "$f" ] || continue
+        [ -s "morsel-screens/$f" ] && continue
         adb shell "run-as io.evren.morsel cat 'files/morsel-screens/$f'" > "morsel-screens/$f" || true
     done
 else
-    echo "note: no in-app screenshot listing (run-as): $(cat shots-err.txt)" || true
+    echo "note: no in-app screenshot listing (run-as): $(cat shots-err.txt)" >&2
 fi
+ls -la morsel-screens/ morsel-screens-host/ >&2 || true
 
 exit "$overall"

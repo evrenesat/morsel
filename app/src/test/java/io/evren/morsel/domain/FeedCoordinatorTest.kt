@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -388,6 +389,49 @@ class FeedCoordinatorTest {
         assertNotNull(journaled.acknowledgedAtEpochMs)
         assertEquals(FeedState.UNKNOWN, journaled.state) // resolved by acknowledgement, still visible
         assertFalse(coordinator.acknowledgeUnresolved()) // acknowledging again is a no-op
+    }
+
+    @Test
+    fun `acknowledgement during polling stays resolved after poll ticks`() = runTest {
+        val repo = FakeRepository()
+        val journal = FakeJournal()
+        val coordinator = newCoordinator(repo, journal)
+        repo.enqueueHistory(
+            listOf(record(null, 1L, 1)), // submit baseline
+            listOf(record(null, 2L, 1)), // would-be first poll tick
+        )
+
+        val result = coordinator.submit(2)
+        assertTrue(result is SubmissionResult.Dispatched)
+        val opId = (result as SubmissionResult.Dispatched).operation.id
+
+        // The user acknowledges while polling is still scheduled (3s/10s/25s).
+        assertTrue(coordinator.acknowledgeUnresolved())
+        assertNull(coordinator.state.value.unresolvedOperation)
+        assertNotNull(coordinator.state.value.lastResolved?.acknowledgedAtEpochMs)
+        assertFalse(coordinator.state.value.blocksNewSubmissions)
+
+        // Time passes through every remaining tick: polling was cancelled, so
+        // no further history reads happen and nothing can resurrect the
+        // acknowledged operation — not even history that would have confirmed it.
+        repo.enqueueHistory(listOf(record(result.operation.requestId, 3L, 2)))
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(1, repo.historyCalls.get()) // baseline only
+        assertNull(coordinator.state.value.unresolvedOperation)
+        assertEquals(opId, coordinator.state.value.lastResolved?.id)
+
+        // The journal keeps the acknowledged entry visible, never rewritten.
+        val journaled = journal.ops.single { it.id == opId }
+        assertNotNull(journaled.acknowledgedAtEpochMs)
+        assertEquals(FeedState.ACCEPTED_UNCONFIRMED, journaled.state)
+
+        // Feeding again is a NEW deliberate operation, never a replay.
+        val second = coordinator.submit(2)
+        assertTrue(second is SubmissionResult.Dispatched)
+        assertEquals(2, repo.writeCalls.get())
+        assertEquals(2, repo.historyCalls.get())
+        assertNotEquals(opId, (second as SubmissionResult.Dispatched).operation.id)
     }
 
     @Test

@@ -58,7 +58,8 @@ class AppGraph(context: MorselApplication, scope: CoroutineScope) : MorselGraph 
 
     override val realJournal: io.evren.morsel.domain.FeedJournal = DataStoreFeedJournal(context, scope)
 
-    private val demoRepository = DemoFeederRepository(
+    /** Exposed for instrumented tests' minimal send-gate injection hook. */
+    val demoRepository = DemoFeederRepository(
         scenarioProvider = { demoScenario },
     )
 

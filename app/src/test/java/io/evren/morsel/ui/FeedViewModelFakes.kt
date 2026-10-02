@@ -66,6 +66,14 @@ internal class RecordingCoordinator : FeedingCoordinator {
 
     override suspend fun acknowledgeUnresolved(): Boolean {
         acknowledgements++
+        // Mirrors production: a recorded acknowledgement retires the active
+        // operation (Feed controls return) and keeps the entry as last resolved.
+        val op = state.value.unresolvedOperation ?: return false
+        if (op.acknowledgedAtEpochMs != null) return false
+        state.value = state.value.copy(
+            unresolvedOperation = null,
+            lastResolved = op.copy(acknowledgedAtEpochMs = 1L),
+        )
         return true
     }
 

@@ -297,6 +297,13 @@ class FeedCoordinator(
     /**
      * Explicit user acknowledgement of an unresolved operation ("I checked the
      * feeder"). Records the resolution in the journal; the entry stays visible.
+     *
+     * Only a durably recorded acknowledgement retires the active operation:
+     * the journal keeps the acknowledged entry, [CoordinatorState.lastResolved]
+     * shows it, and [CoordinatorState.unresolvedOperation] is cleared so the
+     * deliberate Feed controls return. This operation's polling is stopped —
+     * a late poll tick must never reconcile (or resurrect) an acknowledged
+     * operation.
      */
     override suspend fun acknowledgeUnresolved(): Boolean {
         val op = state.value.unresolvedOperation ?: return false
@@ -311,8 +318,9 @@ class FeedCoordinator(
             false
         }
         if (!recorded) return false
+        pollingJob?.cancel()
         mutableState.update {
-            it.copy(unresolvedOperation = acknowledged, lastResolved = acknowledged)
+            it.copy(unresolvedOperation = null, lastResolved = acknowledged)
         }
         return true
     }
@@ -346,7 +354,12 @@ class FeedCoordinator(
             for (delayMs in pollDelaysMs) {
                 pollDelay(delayMs)
                 val current = mutableState.value.unresolvedOperation
-                if (current == null || current.id != operation.id || current.state != FeedState.ACCEPTED_UNCONFIRMED) {
+                if (current == null || current.id != operation.id ||
+                    current.acknowledgedAtEpochMs != null ||
+                    current.state != FeedState.ACCEPTED_UNCONFIRMED
+                ) {
+                    // Resolved elsewhere, acknowledged, or replaced: never
+                    // reconcile a stale operation against fresh history.
                     return@launch
                 }
                 val history = try {

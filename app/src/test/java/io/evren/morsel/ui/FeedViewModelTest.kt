@@ -273,9 +273,37 @@ class FeedViewModelTest {
         reconnected.acknowledgeUnresolved()
         runCurrent()
         assertEquals(1, real.acknowledgements)
+        // A recorded acknowledgement retires the active operation: the Feed
+        // controls return without weakening the never-replayed guarantee.
+        assertNull(reconnected.uiState.value.unresolved)
+        // The reconnected card starts at zero selection (deliberate re-arm);
+        // picking a portion re-enables feeding. The dead caller's write gate
+        // died with it; a new deliberate attempt runs to completion.
+        real.submitGate = null
         reconnected.selectPlus()
+        runCurrent()
+        assertTrue(reconnected.uiState.value.feedEnabled)
         reconnected.feed()
         runCurrent()
-        assertEquals("no resend after reconnect", 1, real.submits)
+        assertEquals(2, real.submits) // NEW deliberate operation, not a resend
+        assertEquals("op2", reconnected.uiState.value.unresolved?.id)
+    }
+
+    @Test
+    fun `acknowledgement returns the same session to deliberate feed state`() = runTest(dispatcher) {
+        runCurrent()
+        viewModel.selectPlus()
+        viewModel.selectPlus()
+        viewModel.feed()
+        runCurrent()
+        assertEquals(FeedState.ACCEPTED_UNCONFIRMED, viewModel.uiState.value.unresolved?.state)
+        assertFalse(viewModel.uiState.value.feedEnabled)
+
+        viewModel.acknowledgeUnresolved()
+        runCurrent()
+        assertNull(viewModel.uiState.value.unresolved)
+        assertTrue(viewModel.uiState.value.feedEnabled)
+        assertEquals(1, real.acknowledgements)
+        assertEquals(1, real.submits) // nothing was resent by acknowledging
     }
 }

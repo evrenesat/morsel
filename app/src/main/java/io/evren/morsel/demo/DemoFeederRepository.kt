@@ -39,6 +39,21 @@ class DemoFeederRepository(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : FeederRepository {
 
+    /**
+     * Test-only injection point: when set, the single write suspends here
+     * BEFORE the scripted outcome until the hook is cleared. Lets instrumented
+     * tests dismiss the card mid-flight; production code never sets it.
+     */
+    fun interface SendGate {
+        suspend fun await(serial: String, portions: Int, requestId: String)
+    }
+
+    @Volatile
+    internal var sendGate: SendGate? = null
+
+    /** Every sendFeed entry, counted so tests can assert exact attempt counts. */
+    internal val sendAttempts = java.util.concurrent.atomic.AtomicInteger()
+
     /** The demo dispatch the history simulator answers to. */
     internal data class DemoDispatch(
         val serial: String,
@@ -69,6 +84,8 @@ class DemoFeederRepository(
 
     override suspend fun sendFeed(serial: String, portions: Int, requestId: String) {
         check(serial == DEMO_SERIAL)
+        sendAttempts.incrementAndGet()
+        sendGate?.await(serial, portions, requestId)
         when (scenarioProvider()) {
             DemoScenario.REJECTED ->
                 throw FeederException.DocumentedRejection(4101, "demo: scripted rejection")

@@ -120,7 +120,8 @@ jobs:
             app/build/reports/androidTests/
             connected-logcat.txt
             emulator-final.png
+            instrument-*.log
+            shots.list
             morsel-screens/
-            morsel-screens-external/
             morsel-screens-host/
           if-no-files-found: warn

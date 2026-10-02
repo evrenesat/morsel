@@ -39,9 +39,14 @@ class FeedPopupActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Outside-tap behavior comes from windowCloseOnTouchOutside in
-        // Theme.Morsel.Popup: with windowIsFloating, a tap outside the card
-        // finishes the activity and is absorbed by the dim layer.
+        // Explicit (not just theme-derived): PhoneWindow only reads
+        // windowCloseOnTouchOutside from a theme after the code has opted in,
+        // so a tap outside the floating card would otherwise never finish the
+        // activity. With windowIsFloating the window stays touch-modal only
+        // inside its frame; outside touches raise ACTION_OUTSIDE, finish the
+        // card, and are absorbed by the dim layer (never passed through to
+        // the launcher beneath).
+        setFinishOnTouchOutside(true)
         window.setBackgroundDrawableResource(android.R.color.transparent)
         setContent {
             val state by viewModel.uiState.collectAsStateWithLifecycle()
