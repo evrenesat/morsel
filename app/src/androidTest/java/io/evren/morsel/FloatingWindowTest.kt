@@ -114,37 +114,62 @@ class FloatingWindowTest {
 
     /** Waits until the system's focused window belongs to the given package. */
     private fun waitUntilForeground(homePackage: String): Boolean {
-        // dumpsys ground truth, not the accessibility window list: after an
-        // ACTION_OUTSIDE dismissal the list kept reporting the just-finished
-        // Morsel window for the whole 10s budget while the launcher plainly
-        // owned the screen (run 36974801304, both APIs). This is the same
-        // signal scripts/ci-emulator.sh trusts for evidence gating.
+        // Two independent signals, either of which counts: the accessibility
+        // window list (worked after BACK dismissals, but kept reporting the
+        // just-finished Morsel window after an ACTION_OUTSIDE dismissal —
+        // run 36974801304) and the system's mCurrentFocus from dumpsys (the
+        // signal scripts/ci-emulator.sh gates evidence with). A failed wait
+        // reports what each signal saw instead of a bare assertion.
         val deadline = System.currentTimeMillis() + 10_000
+        var sawDumpsys: String? = null
+        var sawAccessibility: String? = null
         while (System.currentTimeMillis() < deadline) {
-            if (focusedWindowPackage() == homePackage) return true
+            val dumpsys = focusedWindowPackage()
+            val accessibility = foregroundApplicationPackage()
+            sawDumpsys = dumpsys
+            sawAccessibility = accessibility
+            if (dumpsys == homePackage ||
+                (accessibility == homePackage && device.currentPackageName == homePackage)
+            ) {
+                return true
+            }
             Thread.sleep(250)
         }
-        return focusedWindowPackage() == homePackage
+        throw AssertionError(
+            "foreground never became $homePackage within 10s " +
+                "(last dumpsys focus=$sawDumpsys, last accessibility window=$sawAccessibility, " +
+                "uiautomator=${device.currentPackageName})",
+        )
     }
+
+    /** Raw `mCurrentFocus=` line of the last dumpsys read, for diagnostics. */
+    @Volatile
+    private var lastFocusLine: String? = null
 
     /**
      * Package of the window the system currently gives input focus to, parsed
-     * from `mCurrentFocus=Window{... u0 pkg/activity}`. Null when nothing is
-     * focused. (UiAutomation shell commands interpret no pipes or redirects,
-     * so the stream is scanned directly.)
+     * from `mCurrentFocus=Window{... u0 pkg/activity}`. (UiAutomation shell
+     * commands interpret no pipes or redirects, so the stream is scanned
+     * directly; read failures are logged and surface as null.)
      */
     private fun focusedWindowPackage(): String? = try {
         val pfd = InstrumentationRegistry.getInstrumentation().uiAutomation
             .executeShellCommand("dumpsys window")
-        pfd.use {
-            android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd).bufferedReader()
-                .lineSequence()
-                .map { line -> line.trim() }
-                .firstOrNull { candidate -> candidate.startsWith("mCurrentFocus=") }
-                ?.substringAfter("=")
-                ?.let { value -> Regex("""u\d+ (\S+?)(/|})""").find(value)?.groupValues?.get(1) }
+        val line = pfd.use {
+            java.io.InputStreamReader(
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd),
+            ).useLines { lines ->
+                lines.map { raw -> raw.trim() }
+                    .firstOrNull { candidate -> candidate.startsWith("mCurrentFocus=") }
+            }
         }
-    } catch (_: Exception) {
+        lastFocusLine = line
+        line?.substringAfter("=")?.let { value ->
+            Regex("""u\d+ (\S+?)(/|})""").find(value)?.groupValues?.get(1)
+                ?: value.takeUnless { it == "null" }
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("FloatingWindowTest", "dumpsys mCurrentFocus read failed", e)
         null
     }
 
