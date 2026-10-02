@@ -112,18 +112,40 @@ class FloatingWindowTest {
         )
     }
 
-    /** Waits until the given package owns the focused application window again. */
+    /** Waits until the system's focused window belongs to the given package. */
     private fun waitUntilForeground(homePackage: String): Boolean {
+        // dumpsys ground truth, not the accessibility window list: after an
+        // ACTION_OUTSIDE dismissal the list kept reporting the just-finished
+        // Morsel window for the whole 10s budget while the launcher plainly
+        // owned the screen (run 36974801304, both APIs). This is the same
+        // signal scripts/ci-emulator.sh trusts for evidence gating.
         val deadline = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < deadline) {
-            if (foregroundApplicationPackage() == homePackage &&
-                device.currentPackageName == homePackage
-            ) {
-                return true
-            }
-            device.waitForIdle(1_000)
+            if (focusedWindowPackage() == homePackage) return true
+            Thread.sleep(250)
         }
-        return false
+        return focusedWindowPackage() == homePackage
+    }
+
+    /**
+     * Package of the window the system currently gives input focus to, parsed
+     * from `mCurrentFocus=Window{... u0 pkg/activity}`. Null when nothing is
+     * focused. (UiAutomation shell commands interpret no pipes or redirects,
+     * so the stream is scanned directly.)
+     */
+    private fun focusedWindowPackage(): String? = try {
+        val pfd = InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("dumpsys window")
+        pfd.use {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd).bufferedReader()
+                .lineSequence()
+                .map { line -> line.trim() }
+                .firstOrNull { candidate -> candidate.startsWith("mCurrentFocus=") }
+                ?.substringAfter("=")
+                ?.let { value -> Regex("""u\d+ (\S+?)(/|})""").find(value)?.groupValues?.get(1) }
+        }
+    } catch (_: Exception) {
+        null
     }
 
     @Test
@@ -190,7 +212,8 @@ class FloatingWindowTest {
             waitUntilForeground(homePackage),
         )
         // The home screen is foreground: the tap was absorbed by the dim layer,
-        // never passed through to whatever sits beneath.
-        assertEquals(homePackage, device.currentPackageName)
+        // never passed through to whatever sits beneath (no launcher surface
+        // was replaced by another window either).
+        assertEquals(homePackage, focusedWindowPackage())
     }
 }
