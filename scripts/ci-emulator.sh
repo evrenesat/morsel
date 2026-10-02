@@ -68,13 +68,17 @@ screenshot() {
     return 0
 }
 
-# The logcat carries the MORSEL_SHOT screenshot mirror (see Screenshots.kt);
-# the default ~256KB buffer would rotate it away within seconds, and even 8MB
-# can rotate during a long run, so go big and ALSO dump incrementally per
-# phase (the decoder deduplicates overlapping entries).
-adb logcat -G 16M || overall=1
 # Stale evidence from earlier runs on the same emulator must never mix in.
 adb shell rm -rf /data/local/tmp/morsel-screens || true
+
+# Stream the logcat to disk continuously through phase 1: the ring buffer has
+# already rotated MORSEL_SHOT streams out mid-phase under system log storms
+# (run 36979628029: a vold burst evicted every earlier capture), and the
+# in-app screenshots of the gradle phase cannot be re-pulled after gradle
+# uninstalls the app. The stream file carries every MORSEL_SHOT line ever
+# written.
+adb logcat -v threadtime > connected-logcat-phase1-stream.log 2>&1 &
+LOGCAT_STREAMER_PID=$!
 
 # Phase 1: full suite (process-death pair, visual seed and visual-only
 # classes run in their own phases below so a real restart is never masked by
@@ -89,6 +93,9 @@ else
         overall=1
     fi
 fi
+
+kill "$LOGCAT_STREAMER_PID" 2>/dev/null || true
+wait "$LOGCAT_STREAMER_PID" 2>/dev/null || true
 
 # The APKs are needed for every adb-driven phase; gradle may have uninstalled
 # them after its run.
@@ -193,24 +200,12 @@ fi
 adb logcat -d > connected-logcat.txt || overall=1
 screenshot emulator-final.png || overall=1
 
-# In-app screenshots arrive through three channels; fill morsel-screens/ from
-# all of them before judging completeness:
-#   1. /data/local/tmp copies (shell identity; survive gradle's uninstall and
-#      every later phase) — pulled FIRST so the logcat decoder's incomplete
-#      check only fails for shots that arrived through NO channel;
-#   2. the MORSEL_SHOT logcat mirror (decoded from both dumps, deduplicated);
-#   3. the run-as pull for files that only exist after a later reinstall.
+# In-app screenshots arrive through the MORSEL_SHOT logcat mirror; the mirror
+# lines are carried by the continuous phase-1 stream (rotation-proof) and both
+# ring-buffer dumps (deduplicated by the decoder). The run-as pull covers
+# anything that only exists after a later reinstall.
 mkdir -p morsel-screens
-if adb shell ls /data/local/tmp/morsel-screens > shots-localtmp.list 2> shots-err.txt; then
-    tr -d '\r' < shots-localtmp.list | while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        [ -s "morsel-screens/$f" ] && continue
-        adb shell "cat '/data/local/tmp/morsel-screens/$f'" > "morsel-screens/$f" || true
-    done
-else
-    echo "note: no /data/local/tmp screenshot listing: $(cat shots-err.txt)" >&2
-fi
-for name in connected-logcat.txt connected-logcat-phase1.txt; do
+for name in connected-logcat-phase1-stream.log connected-logcat.txt connected-logcat-phase1.txt; do
     [ -f "$name" ] || continue
     python3 - "$name" <<'PYEOF' || overall=1
 import base64

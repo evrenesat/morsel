@@ -150,7 +150,10 @@ class FloatingWindowTest {
      * Package of the window the system currently gives input focus to, parsed
      * from `mCurrentFocus=Window{... u0 pkg/activity}`. (UiAutomation shell
      * commands interpret no pipes or redirects, so the stream is scanned
-     * directly; read failures are logged and surface as null.)
+     * directly; read failures are logged and surface as null. Plain string
+     * splitting, not a regex — Android's ICU regex engine rejects an
+     * unescaped `}` in an alternation, which left this parse dead for two CI
+     * runs before the logged exception revealed it.)
      */
     private fun focusedWindowPackage(): String? = try {
         val pfd = InstrumentationRegistry.getInstrumentation().uiAutomation
@@ -164,10 +167,10 @@ class FloatingWindowTest {
             }
         }
         lastFocusLine = line
-        line?.substringAfter("=")?.let { value ->
-            Regex("""u\d+ (\S+?)(/|})""").find(value)?.groupValues?.get(1)
-                ?: value.takeUnless { it == "null" }
-        }
+        line?.substringAfter("=")
+            ?.substringAfter(" u0 ", missingDelimiterValue = "")
+            ?.substringBefore("/")
+            ?.takeUnless { it.isEmpty() || it == "null" }
     } catch (e: Exception) {
         android.util.Log.w("FloatingWindowTest", "dumpsys mCurrentFocus read failed", e)
         null

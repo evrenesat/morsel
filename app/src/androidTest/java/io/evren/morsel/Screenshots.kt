@@ -9,30 +9,28 @@ import java.io.FileOutputStream
 
 /**
  * Saves screenshots into the app's INTERNAL files dir (pullable with run-as
- * for as long as the app stays installed), mirrors every capture into the
- * logcat buffer under [TAG], and copies it to /data/local/tmp/morsel-screens
- * with adopted shell identity. Gradle uninstalls the app when its connected
- * run ends — wiping internal storage — so the two mirrors are what survives:
- * scripts/ci-emulator.sh decodes the MORSEL_SHOT stream and pulls the
- * /data/local/tmp copies. One channel alone has already lost evidence (logd
- * silently drops tail chunks of a fast burst; the run-as pull cannot see
- * phase-1 files the uninstall wiped).
+ * for as long as the app stays installed) AND mirrors every capture into the
+ * logcat buffer under [TAG]: Gradle uninstalls the app when its connected run
+ * ends — wiping internal storage — so the logcat stream (captured continuously
+ * by scripts/ci-emulator.sh, immune to buffer rotation) plus the run-as pull
+ * are the two channels that carry evidence out.
  *
  * Logcat entries are capped at ~4KB, so the base64 body travels in numbered
- * chunks with BEGIN/END markers per screenshot. The mirrors are best-effort;
- * a failure never fails the test itself.
+ * chunks with BEGIN/END markers per screenshot, paced so logd cannot drop the
+ * tail of a burst. The mirror is best-effort; a failure never fails the test
+ * itself. (/data/local/tmp copies under adopted shell identity were tried and
+ * do NOT work: the permission identity changes permission checks, not the
+ * app's Linux UID, and /data/local/tmp is not writable by app UIDs.)
  */
 object Screenshots {
 
     private const val TAG = "MORSEL_SHOT"
     private const val CHUNK_B64 = 1800
-    private const val TMP_DIR = "/data/local/tmp/morsel-screens"
 
     fun capture(name: String) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val dir = File(context.filesDir, "morsel-screens")
         captureInto(dir, name)
-        copyViaShellIdentity(dir, name)
         mirrorViaLogcat(dir, name)
     }
 
@@ -44,23 +42,6 @@ object Screenshots {
         val out = File(dir, "$safe.png")
         FileOutputStream(out).use { shot.compress(Bitmap.CompressFormat.PNG, 100, it) }
         shot.recycle()
-    }
-
-    /**
-     * /data/local/tmp is owned by shell and not wiped by app uninstalls, so a
-     * copy there survives gradle's post-suite uninstall. Writing it needs the
-     * shell identity, which an instrumentation may adopt.
-     */
-    private fun copyViaShellIdentity(dir: File, rawName: String) {
-        runCatching {
-            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-            automation.adoptShellPermissionIdentity()
-            val target = File(TMP_DIR)
-            target.mkdirs()
-            File(dir, "${sanitize(rawName)}.png").copyTo(File(target, "${sanitize(rawName)}.png"), overwrite = true)
-        }.onFailure {
-            println("morsel-screens: /data/local/tmp copy of $rawName failed: $it")
-        }
     }
 
     private fun mirrorViaLogcat(dir: File, rawName: String) {

@@ -168,14 +168,17 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
                 latestSettings = it
             }
         }
-        var loggedFirstUiState = false
+        var loggedFirstRealUiState = false
         viewModelScope.launch {
             uiState.collect {
-                if (!loggedFirstUiState) {
-                    loggedFirstUiState = true
+                // The first emission is always the stateIn default; the
+                // interesting one is the first REAL pipeline product.
+                if (!loggedFirstRealUiState && it != FeedUiState()) {
+                    loggedFirstRealUiState = true
                     println(
-                        "FeedViewModel: uiState first emission " +
-                            "(${System.currentTimeMillis() - createdWallMs}ms after creation, demo=${it.demoMode})",
+                        "FeedViewModel: uiState first real state " +
+                            "(${System.currentTimeMillis() - createdWallMs}ms after creation, " +
+                            "demo=${it.demoMode}, screen=${it.screen})",
                     )
                 }
             }

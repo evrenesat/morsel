@@ -124,6 +124,7 @@ jobs:
             app/build/reports/androidTests/
             connected-logcat.txt
             connected-logcat-phase1.txt
+            connected-logcat-phase1-stream.log
             emulator-final.png
             instrument-*.log
             shots*.list
