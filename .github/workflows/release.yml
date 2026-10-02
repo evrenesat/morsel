@@ -59,8 +59,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
-    env:
-      MORSEL_STORE_FILE: ${{ runner.temp }}/morsel-release.keystore
     steps:
       - uses: actions/checkout@v5
 
@@ -91,11 +89,12 @@ jobs:
             echo "MORSEL_KEYSTORE_BASE64 is not set" >&2
             exit 1
           fi
-          printf '%s' "$MORSEL_KEYSTORE_BASE64" | base64 --decode > "$MORSEL_STORE_FILE"
-          chmod 600 "$MORSEL_STORE_FILE"
+          printf '%s' "$MORSEL_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/morsel-release.keystore"
+          chmod 600 "$RUNNER_TEMP/morsel-release.keystore"
 
       - name: Build signed release APK
         env:
+          MORSEL_STORE_FILE: ${{ runner.temp }}/morsel-release.keystore
           MORSEL_STORE_PASSWORD: ${{ secrets.MORSEL_STORE_PASSWORD }}
           MORSEL_KEY_ALIAS: ${{ secrets.MORSEL_KEY_ALIAS }}
           MORSEL_KEY_PASSWORD: ${{ secrets.MORSEL_KEY_PASSWORD }}
@@ -123,7 +122,7 @@ jobs:
 
       - name: Remove signing key from runner
         if: always()
-        run: rm -f "$MORSEL_STORE_FILE"
+        run: rm -f "$RUNNER_TEMP/morsel-release.keystore"
 
       - name: Publish prerelease (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
