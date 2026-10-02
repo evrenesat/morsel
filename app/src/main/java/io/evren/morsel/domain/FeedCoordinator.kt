@@ -1,13 +1,16 @@
 package io.evren.morsel.domain
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** Outcome of a deliberate submit attempt. No outcome ever queues a retry. */
@@ -86,6 +89,8 @@ interface FeedingCoordinator {
  * - the write HTTP call happens at most once per operation, whatever the fault;
  * - 1009 on the write never triggers re-login/replay;
  * - DISPATCHING entries found at startup become UNKNOWN and are never resent;
+ * - caller cancellation after the durable dispatch presents UNKNOWN (in-memory
+ *   plus one bounded journal write) and is never resent;
  * - polling after acceptance is read-only, at injectable delays.
  */
 class FeedCoordinator(
@@ -179,7 +184,8 @@ class FeedCoordinator(
                 )
             }
 
-            // THE single write. No retry under any failure.
+            // THE single write. No retry under any failure. Caller cancellation
+            // after the durable dispatch is recovered conservatively below.
             return try {
                 repository.sendFeed(operation.serial, operation.portions, operation.requestId)
                 val accepted = operation.copy(state = FeedState.ACCEPTED_UNCONFIRMED)
@@ -191,6 +197,9 @@ class FeedCoordinator(
                     // Outcome could not be persisted: present conservative UNKNOWN.
                     SubmissionResult.Unresolved(presented, false)
                 }
+            } catch (e: CancellationException) {
+                recordCancellationAsUnknown(operation)
+                throw e
             } catch (e: FeederException) {
                 val (nextState, authExpired) = when (e) {
                     is FeederException.DocumentedRejection -> {
@@ -310,6 +319,26 @@ class FeedCoordinator(
 
     /** Explicit logout/rebind must surface, not hide, the unresolved operation. */
     override suspend fun unresolvedAfterRebind(): FeedOperation? = state.value.unresolvedOperation
+
+    /**
+     * The submitting caller (e.g. the dismissed card's scope) was cancelled
+     * mid-flight after the request had been made durable. Record UNKNOWN with
+     * a bounded non-cancellable journal write so the outcome stays visible and
+     * blocking, then rethrow. Never retries; never overwrites an outcome that
+     * was already durably recorded.
+     */
+    private suspend fun recordCancellationAsUnknown(operation: FeedOperation) {
+        val current = state.value.unresolvedOperation
+        if (current?.id != operation.id || current.state != FeedState.DISPATCHING) return
+        val unknown = operation.copy(state = FeedState.UNKNOWN)
+        try {
+            withContext(NonCancellable) { journal.upsert(unknown) }
+        } catch (_: JournalPersistenceException) {
+            // The journal keeps DISPATCHING (startup restore maps it to
+            // UNKNOWN); the in-memory entry still blocks resends.
+        }
+        mutableState.update { it.copy(unresolvedOperation = unknown) }
+    }
 
     private fun schedulePolling(operation: FeedOperation) {
         pollingJob?.cancel()

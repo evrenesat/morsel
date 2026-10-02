@@ -37,6 +37,16 @@
     <string name="rejected_body">De cloud van de voederbak heeft dit verzoek geweigerd. Er is niets naar de bak gestuurd.</string>
     <string name="storage_error_body">Morsel kan zijn eigen journaal niet lezen. Voeren is geblokkeerd zodat er nooit twee keer voer kan vallen. Sluit de app en open hem opnieuw; blijft deze melding staan, controleer dan eerst zelf de voederbak.</string>
 
+    <!-- Meldingen bij een geblokkeerde voedingspoging: er is dan niets verstuurd. -->
+    <string name="blocked_offline">De voederbak is offline. Er is niets verstuurd.</string>
+    <string name="blocked_serial_missing">De gekoppelde voederbak zit niet meer in dit account. Er is niets verstuurd.</string>
+    <string name="blocked_wrong_model">Het gekoppelde apparaat is geen Air Smart Feeder. Er is niets verstuurd.</string>
+    <string name="blocked_no_binding">Er is nog geen voederbak gekoppeld. Er is niets verstuurd.</string>
+    <string name="blocked_preflight">De cloud van de voederbak was niet bereikbaar. Er is niets verstuurd.</string>
+    <string name="blocked_journal_write">Morsel kon deze voeding niet vóór het versturen vastleggen, dus er is niets verstuurd.</string>
+    <string name="blocked_no_request">Er is geen verzoek verstuurd.</string>
+    <string name="status_read_failed">De status van de voederbak kon niet worden ververst. Het laatste verzoek blijft onopgehelderd.</string>
+
     <!-- Footer -->
     <string name="footer_idle">Morsel plaatst voedingen nooit in de wachtrij en herhaalt ze nooit.</string>
     <string name="feeder_history_line">Geschiedenis voederbak: %1$d porties, %2$s.</string>

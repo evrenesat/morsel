@@ -1,9 +1,11 @@
 package io.evren.morsel.ui
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import io.evren.morsel.MorselGraph
+import io.evren.morsel.R
 import io.evren.morsel.data.MorselSettings
 import io.evren.morsel.data.PasswordDigest
 import io.evren.morsel.demo.DemoScenario
@@ -59,6 +61,12 @@ data class FeedUiState(
     val demoMode: Boolean = false,
     /** Success observed in this session (never from a restored journal). */
     val successThisSession: Boolean = false,
+    /**
+     * One actionable status for the last deliberate attempt or read, as a
+     * localized string resource. Blocked pre-send outcomes all say that no
+     * request was sent. Never carries exception or account data.
+     */
+    @StringRes val noticeRes: Int? = null,
 ) {
     val cap: Int get() = settings.portionCap
 
@@ -88,6 +96,7 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
     private val setup = MutableStateFlow<SetupState>(SetupState.Welcome)
     private val selection = MutableStateFlow(0)
     private val successThisSession = MutableStateFlow(false)
+    private val notice = MutableStateFlow<Int?>(null)
 
     // Latest source values, maintained by collectors so action decisions never
     // depend on the (render-only) uiState pipeline having caught up.
@@ -109,6 +118,7 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
         successThisSession,
         realCoordinator.state,
         demoCoordinator.state,
+        notice,
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val settings = values[0] as MorselSettings
@@ -121,6 +131,7 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
             selection = values[3] as Int,
             demoMode = isDemo,
             successThisSession = values[4] as Boolean,
+            noticeRes = values[7] as Int?,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, FeedUiState())
 
@@ -190,21 +201,47 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
             )
         if (!allowed) return
         dispatchMadeThisSession = true
+        // A fresh deliberate attempt clears stale feedback.
+        notice.value = null
         viewModelScope.launch {
             val result = (if (latestSettings.demoMode) demoCoordinator else realCoordinator).submit(portions)
-            if (result is SubmissionResult.Blocked && result.reason == SubmissionResult.Blocked.Reason.UNRESOLVED_OPERATION) {
-                // Keep the guard honest: nothing queued, nothing sent.
-                Unit
+            when {
+                result is SubmissionResult.Blocked -> notice.value = blockedNotice(result.reason)
+                result is SubmissionResult.JournalWriteFailed -> notice.value = R.string.blocked_journal_write
+                else -> Unit
             }
         }
+    }
+
+    /** Localized notice for a blocked attempt. Known pre-send outcomes say nothing was sent. */
+    @StringRes
+    private fun blockedNotice(reason: SubmissionResult.Blocked.Reason): Int? = when (reason) {
+        SubmissionResult.Blocked.Reason.OFFLINE -> R.string.blocked_offline
+        SubmissionResult.Blocked.Reason.SERIAL_MISSING -> R.string.blocked_serial_missing
+        SubmissionResult.Blocked.Reason.WRONG_MODEL -> R.string.blocked_wrong_model
+        SubmissionResult.Blocked.Reason.NO_BINDING -> R.string.blocked_no_binding
+        SubmissionResult.Blocked.Reason.PREFLIGHT_FAILED -> R.string.blocked_preflight
+        SubmissionResult.Blocked.Reason.INVALID_PORTIONS -> R.string.blocked_no_request
+        // These already have dedicated status UI; a notice would only duplicate.
+        SubmissionResult.Blocked.Reason.UNRESOLVED_OPERATION -> null
+        SubmissionResult.Blocked.Reason.STORAGE_ERROR -> null
     }
 
     fun checkStatus() {
         val coordinator = if (uiState.value.demoMode) demoCoordinator else realCoordinator
         viewModelScope.launch {
             val outcome = coordinator.checkStatus()
-            if (outcome == StatusCheckOutcome.RESOLVED_SUCCESS) {
-                successThisSession.value = true
+            when (outcome) {
+                StatusCheckOutcome.RESOLVED_SUCCESS -> {
+                    successThisSession.value = true
+                    notice.value = null
+                }
+                StatusCheckOutcome.RESOLVED_MISMATCH -> notice.value = null
+                StatusCheckOutcome.READ_FAILED ->
+                    // Uncertainty is preserved; say the confirmation could not
+                    // be refreshed.
+                    notice.value = R.string.status_read_failed
+                StatusCheckOutcome.STILL_UNCONFIRMED, StatusCheckOutcome.NO_OPERATION -> Unit
             }
         }
     }
@@ -212,6 +249,7 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
     /** Explicit "I checked the feeder": records resolution, never erases. */
     fun acknowledgeUnresolved() {
         val coordinator = if (uiState.value.demoMode) demoCoordinator else realCoordinator
+        notice.value = null
         viewModelScope.launch { coordinator.acknowledgeUnresolved() }
     }
 

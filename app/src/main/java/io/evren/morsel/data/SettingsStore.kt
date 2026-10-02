@@ -57,18 +57,29 @@ interface MorselSettingsStore : io.evren.morsel.domain.FeedSettingsSource {
  * Credentials never live here; they live encrypted in CredentialVault, and the
  * journal never lives here either.
  */
-class SettingsStore(
-    context: Context,
+class SettingsStore private constructor(
+    fileProvider: () -> File,
     scope: CoroutineScope,
 ) : MorselSettingsStore {
+
+    /** Device path: settings live in no-backup storage. */
+    constructor(context: Context, scope: CoroutineScope) : this(
+        { File(context.noBackupFilesDir, SETTINGS_FILE) },
+        scope,
+    )
+
+    /** Directory-injected path for instrumented smoke tests. */
+    internal constructor(directory: File, scope: CoroutineScope) : this(
+        { File(directory, SETTINGS_FILE) },
+        scope,
+    )
 
     private val store: DataStore<androidx.datastore.preferences.core.Preferences> =
         PreferenceDataStoreFactory.create(
             scope = scope,
             corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
-        ) {
-            File(context.noBackupFilesDir, "morsel.settings.preferences_pb")
-        }
+            produceFile = fileProvider,
+        )
 
     override val settings: Flow<MorselSettings> = store.data.map { prefs ->
         MorselSettings(
@@ -129,6 +140,7 @@ class SettingsStore(
     }
 
     private companion object {
+        private const val SETTINGS_FILE = "morsel.settings.preferences_pb"
         val KEY_SERIAL = stringPreferencesKey("bound_serial")
         val KEY_CAT_NAME = stringPreferencesKey("cat_name")
         val KEY_CAP = intPreferencesKey("portion_cap")

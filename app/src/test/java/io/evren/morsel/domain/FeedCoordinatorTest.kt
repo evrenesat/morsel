@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -334,6 +335,43 @@ class FeedCoordinatorTest {
         assertEquals(0, repo.deviceCalls.get())
         assertEquals(0, repo.statusCalls.get())
         assertEquals(0, repo.writeCalls.get())
+    }
+
+    @Test
+    fun `caller cancellation after the durable dispatch records unknown exactly once`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repo = FakeRepository().apply { writeGate = gate }
+        val journal = FakeJournal()
+        val coordinator = newCoordinator(repo, journal)
+
+        val caller = launch { coordinator.submit(2) }
+        runCurrent()
+        // The request is durable and the single write is in flight.
+        assertEquals(1, repo.writeCalls.get())
+        assertEquals(FeedState.DISPATCHING, coordinator.state.value.unresolvedOperation?.state)
+
+        // Card dismissal cancels the submitting caller mid-flight.
+        caller.cancel()
+        runCurrent()
+
+        // Conservative UNKNOWN, visible and blocking, durably recorded.
+        assertEquals(FeedState.UNKNOWN, coordinator.state.value.unresolvedOperation?.state)
+        assertTrue(coordinator.state.value.blocksNewSubmissions)
+        assertEquals(FeedState.UNKNOWN, journal.ops.single().state)
+
+        // The transport completes late; the request is never repeated.
+        gate.complete(Unit)
+        runCurrent()
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(1, repo.writeCalls.get())
+        assertEquals(1, journal.ops.size)
+
+        // Check status and acknowledgement remain available for this outcome.
+        val outcome = coordinator.checkStatus()
+        assertEquals(StatusCheckOutcome.STILL_UNCONFIRMED, outcome)
+        assertTrue(coordinator.acknowledgeUnresolved())
+        assertFalse(coordinator.state.value.blocksNewSubmissions)
     }
 
     @Test

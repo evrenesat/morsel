@@ -37,6 +37,16 @@
     <string name="rejected_body">The feeder cloud rejected this request. Nothing was sent to the bowl.</string>
     <string name="storage_error_body">Morsel cannot read its own operation journal. Feeding is blocked so nothing can be dispensed twice. Close and reopen the app; if this message stays, check the feeder itself before feeding.</string>
 
+    <!-- Blocked attempt notices: known pre-send outcomes always say nothing was sent. -->
+    <string name="blocked_offline">The feeder is offline. Nothing was sent.</string>
+    <string name="blocked_serial_missing">The bound feeder is no longer in this account. Nothing was sent.</string>
+    <string name="blocked_wrong_model">The bound device is not an Air Smart Feeder. Nothing was sent.</string>
+    <string name="blocked_no_binding">No feeder is bound yet. Nothing was sent.</string>
+    <string name="blocked_preflight">The feeder cloud could not be reached. Nothing was sent.</string>
+    <string name="blocked_journal_write">Morsel could not record this feeding before sending, so nothing was sent.</string>
+    <string name="blocked_no_request">No request was sent.</string>
+    <string name="status_read_failed">Could not refresh the feeder status. The last request stays unresolved.</string>
+
     <!-- Footer -->
     <string name="footer_idle">Morsel never queues or repeats feedings.</string>
     <string name="feeder_history_line">Feeder history: %1$d portions, %2$s.</string>

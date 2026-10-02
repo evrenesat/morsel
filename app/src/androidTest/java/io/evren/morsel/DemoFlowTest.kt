@@ -1,0 +1,135 @@
+package io.evren.morsel
+
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.evren.morsel.demo.DemoScenario
+import io.evren.morsel.ui.Tags
+import kotlinx.coroutines.runBlocking
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * Full user flow against the production coordinator + demo repository (real
+ * code, scripted transport). Per the plan: success with explicit correlation,
+ * accepted unconfirmed, rejected, timeout/unknown, mismatch, offline.
+ */
+@RunWith(AndroidJUnit4::class)
+abstract class DemoFlowBase(private val scenario: DemoScenario, private val label: String) {
+
+    @get:Rule
+    val compose = createAndroidComposeRule<FeedPopupActivity>()
+
+    private val graph: AppGraph
+        get() = (
+            InstrumentationRegistry.getInstrumentation()
+                .targetContext.applicationContext as MorselApplication
+            ).graph
+
+    @Before
+    fun prepareDemoState() {
+        runBlocking {
+            graph.settingsStore.setBoundSerial(null)
+            graph.settingsStore.setCatName(null)
+            graph.settingsStore.setOnboardingComplete(false)
+            graph.settingsStore.setDemoMode(false)
+            graph.settingsStore.setDemoScenario(scenario)
+            graph.settingsStore.setDemoMode(true)
+            graph.settingsStore.setOnboardingComplete(true)
+        }
+    }
+
+    @Test
+    fun demoFlow() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+        // Demo is clearly labelled and starts at zero with an empty cup.
+        compose.onNodeWithTag(Tags.DEMO_BANNER).assertExists()
+        compose.onNodeWithTag(Tags.FEED).assertIsNotEnabled()
+
+        if (scenario == DemoScenario.OFFLINE) {
+            compose.onNodeWithText(context.getString(R.string.demo_offline_button)).assertExists()
+            Screenshots.capture("demo-$label-offline")
+            return
+        }
+
+        compose.onNodeWithTag(Tags.PLUS).performClick()
+        compose.onNodeWithTag(Tags.PLUS).performClick()
+        compose.onNodeWithTag(Tags.FEED).assertIsEnabled().performClick()
+
+        when (scenario) {
+            DemoScenario.SUCCESS_CORRELATED -> {
+                // The read-only poll confirms via correlation; Done appears and
+                // the Feed button does not come back in this session.
+                compose.waitUntil(15_000) {
+                    compose.onAllNodesWithTag(Tags.DONE).fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithText(context.getString(R.string.success_title)).assertExists()
+                compose.onNodeWithTag(Tags.FEED).assertDoesNotExist()
+                Screenshots.capture("demo-$label-success")
+            }
+            DemoScenario.ACCEPTED_UNCONFIRMED -> {
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithTag(Tags.CHECK_STATUS).fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithText(context.getString(R.string.accepted_unconfirmed_body)).assertExists()
+                Screenshots.capture("demo-$label-unconfirmed")
+                // Explicit acknowledgement explains duplicate risk before a fresh feed.
+                compose.onNodeWithTag(Tags.ACK).performClick()
+                compose.onNodeWithText(context.getString(R.string.ack_dialog_confirm)).performClick()
+                compose.waitUntil(5_000) {
+                    compose.onAllNodesWithTag(Tags.FEED).fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithTag(Tags.FEED).assertIsEnabled()
+            }
+            DemoScenario.REJECTED -> {
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithText(context.getString(R.string.rejected_body))
+                        .fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithTag(Tags.FEED).assertIsEnabled()
+                Screenshots.capture("demo-$label-rejected")
+            }
+            DemoScenario.TIMEOUT_UNKNOWN -> {
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithTag(Tags.CHECK_STATUS).fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithText(context.getString(R.string.unknown_body)).assertExists()
+                compose.onNodeWithTag(Tags.ACK).assertExists()
+                Screenshots.capture("demo-$label-unknown")
+            }
+            DemoScenario.MISMATCH -> {
+                compose.waitUntil(15_000) {
+                    compose.onAllNodesWithText(
+                        context.getString(R.string.mismatch_body, 2),
+                    ).fetchSemanticsNodes().isNotEmpty()
+                }
+                // No automatic top-up: the Feed button returns for deliberate use only.
+                compose.onNodeWithTag(Tags.FEED).assertIsEnabled()
+                Screenshots.capture("demo-$label-mismatch")
+            }
+            DemoScenario.OFFLINE -> Unit // handled above
+        }
+    }
+}
+
+class DemoSuccessFlowTest : DemoFlowBase(DemoScenario.SUCCESS_CORRELATED, "success")
+
+class DemoUnconfirmedFlowTest : DemoFlowBase(DemoScenario.ACCEPTED_UNCONFIRMED, "unconfirmed")
+
+class DemoRejectedFlowTest : DemoFlowBase(DemoScenario.REJECTED, "rejected")
+
+class DemoUnknownFlowTest : DemoFlowBase(DemoScenario.TIMEOUT_UNKNOWN, "unknown")
+
+class DemoMismatchFlowTest : DemoFlowBase(DemoScenario.MISMATCH, "mismatch")
+
+class DemoOfflineFlowTest : DemoFlowBase(DemoScenario.OFFLINE, "offline")

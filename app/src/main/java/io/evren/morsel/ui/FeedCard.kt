@@ -60,6 +60,7 @@ object Tags {
     const val ACK = "morsel.ack"
     const val GEAR = "morsel.gear"
     const val STATUS = "morsel.status"
+    const val NOTICE = "morsel.notice"
     const val DEMO_BANNER = "morsel.demo_banner"
 }
 
@@ -300,6 +301,12 @@ private fun StatusArea(
 ) {
     val unresolved = state.unresolved
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        // Actionable feedback for the last attempt or read (e.g. "feeder was
+        // offline, nothing was sent"); cleared on a fresh deliberate attempt.
+        state.noticeRes?.let { res ->
+            StatusLine(stringResource(res), Tags.NOTICE)
+            Spacer(Modifier.size(8.dp))
+        }
         when {
             // Unreadable journal: sending is blocked, say so plainly. No feed
             // button is offered while earlier operation state is unknown.

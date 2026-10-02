@@ -7,9 +7,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -54,11 +54,13 @@ class FeedPopupActivity : ComponentActivity() {
             }
             val motionEnabled = !state.settings.reduceMotion && animatorScale > 0f
             MorselTheme(motionEnabled = motionEnabled) {
+                // Wrap content (never fillMaxSize): the floating window then
+                // wraps the card itself, so the window frame IS the card.
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.systemBars)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .widthIn(max = 368.dp),
                     contentAlignment = Alignment.TopCenter,
                 ) {
                     when (state.screen) {
