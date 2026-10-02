@@ -26,6 +26,9 @@ interface MorselGraph {
     val realRepository: io.evren.morsel.domain.FeederRepository
     val realCoordinator: io.evren.morsel.domain.FeedingCoordinator
     val demoCoordinator: io.evren.morsel.domain.FeedingCoordinator
+
+    /** The real persistent journal; lets tests seed a pre-dispatch operation. */
+    val realJournal: io.evren.morsel.domain.FeedJournal
 }
 
 /**
@@ -53,6 +56,8 @@ class AppGraph(context: MorselApplication, scope: CoroutineScope) : MorselGraph 
 
     override val realRepository: io.evren.morsel.domain.FeederRepository = PetlibroFeederRepository(client, auth)
 
+    override val realJournal: io.evren.morsel.domain.FeedJournal = DataStoreFeedJournal(context, scope)
+
     private val demoRepository = DemoFeederRepository(
         scenarioProvider = { demoScenario },
     )
@@ -65,7 +70,7 @@ class AppGraph(context: MorselApplication, scope: CoroutineScope) : MorselGraph 
 
     override val realCoordinator: io.evren.morsel.domain.FeedingCoordinator = FeedCoordinator(
         repository = realRepository,
-        journal = DataStoreFeedJournal(context, scope),
+        journal = realJournal,
         settingsSource = { settingsStore.snapshot() },
         scope = scope,
     )

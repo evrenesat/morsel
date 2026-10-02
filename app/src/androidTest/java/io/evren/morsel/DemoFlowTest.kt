@@ -22,12 +22,20 @@ import org.junit.runner.RunWith
  * Full user flow against the production coordinator + demo repository (real
  * code, scripted transport). Per the plan: success with explicit correlation,
  * accepted unconfirmed, rejected, timeout/unknown, mismatch, offline.
+ *
+ * The application-scoped demo coordinator, repository and settings persist
+ * across test classes in one process, so [prepareDemoState] resets leftover
+ * unresolved state, awaits the scenario switch, and (via the ViewModel's
+ * settings-driven screen) lands on the demo Feed card before asserting.
  */
 @RunWith(AndroidJUnit4::class)
 abstract class DemoFlowBase(private val scenario: DemoScenario, private val label: String) {
 
     @get:Rule
     val compose = createAndroidComposeRule<FeedPopupActivity>()
+
+    @get:Rule
+    val failureScreenshot = FailureScreenshotRule()
 
     private val graph: AppGraph
         get() = (
@@ -38,6 +46,12 @@ abstract class DemoFlowBase(private val scenario: DemoScenario, private val labe
     @Before
     fun prepareDemoState() {
         runBlocking {
+            // A previous class may have left an unresolved demo operation
+            // (its polling stops once nothing blocks anymore).
+            repeat(3) {
+                if (!graph.demoCoordinator.state.value.blocksNewSubmissions) return@repeat
+                graph.demoCoordinator.acknowledgeUnresolved()
+            }
             graph.settingsStore.setBoundSerial(null)
             graph.settingsStore.setCatName(null)
             graph.settingsStore.setOnboardingComplete(false)
@@ -45,6 +59,14 @@ abstract class DemoFlowBase(private val scenario: DemoScenario, private val labe
             graph.settingsStore.setDemoScenario(scenario)
             graph.settingsStore.setDemoMode(true)
             graph.settingsStore.setOnboardingComplete(true)
+
+            // The demo repository reads the scenario through the graph's
+            // settings collector; wait for the switch to land so this test's
+            // dispatch never races the previous scenario.
+            val deadline = System.currentTimeMillis() + 5_000
+            while (graph.demoScenario != scenario && System.currentTimeMillis() < deadline) {
+                Thread.sleep(25)
+            }
         }
     }
 
@@ -68,10 +90,13 @@ abstract class DemoFlowBase(private val scenario: DemoScenario, private val labe
 
         when (scenario) {
             DemoScenario.SUCCESS_CORRELATED -> {
-                // The read-only poll confirms via correlation; Done appears and
-                // the Feed button does not come back in this session.
+                // Wait for the CORRELATED confirmation text itself: the
+                // unresolved state also shows a Done button, so a Done-tag
+                // wait would pass before the poll has ever confirmed.
                 compose.waitUntil(15_000) {
-                    compose.onAllNodesWithTag(Tags.DONE).fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodesWithText(
+                        context.getString(R.string.success_title),
+                    ).fetchSemanticsNodes().isNotEmpty()
                 }
                 compose.onNodeWithText(context.getString(R.string.success_title)).assertExists()
                 compose.onNodeWithTag(Tags.FEED).assertDoesNotExist()

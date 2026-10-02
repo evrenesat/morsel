@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -145,12 +144,19 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
         viewModelScope.launch {
             demoCoordinator.state.collect { latestDemo = it }
         }
+        // The screen follows the persisted mode live: a card opened before
+        // onboarding (or before demo mode was enabled by another surface)
+        // switches to FEED as soon as the settings say so, and back to SETUP
+        // when the user signs out or exits the demo.
         viewModelScope.launch {
-            val initial = graph.settingsStore.settings.first()
-            screen.value = if (initial.demoMode || initial.onboardingComplete) {
-                CardScreen.FEED
-            } else {
-                CardScreen.SETUP
+            graph.settingsStore.settings.collect {
+                if (screen.value != CardScreen.SETTINGS) {
+                    screen.value = if (it.demoMode || it.onboardingComplete) {
+                        CardScreen.FEED
+                    } else {
+                        CardScreen.SETUP
+                    }
+                }
             }
         }
         // Latch in-session success: a REPORTED_SUCCESS reached after a deliberate

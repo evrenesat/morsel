@@ -115,4 +115,8 @@ internal class InstrumentedGraph(
     override val realRepository = InstrumentedRepository()
     override val realCoordinator = realCoordinator
     override val demoCoordinator = demoCoordinator
+    override val realJournal = object : io.evren.morsel.domain.FeedJournal {
+        override suspend fun all(): List<io.evren.morsel.domain.FeedOperation> = emptyList()
+        override suspend fun upsert(operation: io.evren.morsel.domain.FeedOperation) = Unit
+    }
 }

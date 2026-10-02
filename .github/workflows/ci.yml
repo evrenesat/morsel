@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -62,6 +63,13 @@ jobs:
       fail-fast: false
       matrix:
         api: [30, 36]
+        include:
+          - api: 36
+            visual: '1'
+          - api: 30
+            visual: '0'
+    env:
+      MORSEL_VISUAL: ${{ matrix.visual }}
     steps:
       - uses: actions/checkout@v5
 
@@ -89,6 +97,9 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # ONE script command: test status and evidence collection live in the
+      # same shell process (scripts/ci-emulator.sh), so failing tests can
+      # never report a green step.
       - name: Run instrumented tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -97,11 +108,7 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            ./gradlew --no-daemon connectedDebugAndroidTest; status=$?
-            adb logcat -d > connected-logcat.txt || true
-            adb pull /sdcard/Android/data/io.evren.morsel/files/morsel-screens morsel-screens >/dev/null 2>&1 || true
-            exit $status
+          script: bash scripts/ci-emulator.sh
 
       - name: Upload emulator reports, screenshots and logcat
         if: always()
@@ -112,5 +119,8 @@ jobs:
             app/build/outputs/androidTest-results/
             app/build/reports/androidTests/
             connected-logcat.txt
+            emulator-final.png
             morsel-screens/
+            morsel-screens-external/
+            morsel-screens-host/
           if-no-files-found: warn

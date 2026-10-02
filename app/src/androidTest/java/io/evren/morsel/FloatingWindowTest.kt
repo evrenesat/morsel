@@ -1,6 +1,7 @@
 package io.evren.morsel
 
 import android.content.Intent
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -9,23 +10,51 @@ import androidx.test.uiautomator.Until
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
  * Proves the card is a genuinely floating window: its window frame is smaller
- * than the display, the launcher stays visible behind it, outside taps dismiss
- * without touching anything underneath, and Back dismisses.
+ * than the display, the home screen stays alive behind it, outside taps dismiss
+ * without touching anything underneath, and Back dismisses back to home.
+ *
+ * The home package is captured from the actual foreground application window
+ * after pressHome — on unprovisioned CI emulators the PackageManager resolves
+ * CATEGORY_HOME to com.android.settings, so device.launcherPackageName lies.
  */
 @RunWith(AndroidJUnit4::class)
 class FloatingWindowTest {
 
+    @get:Rule
+    val failureScreenshot = FailureScreenshotRule()
+
     private val device: UiDevice
         get() = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
 
-    private fun goHome() {
+    private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    /** Package of the focused application window right now (the launcher after Home). */
+    private fun foregroundApplicationPackage(): String? {
+        val windows = InstrumentationRegistry.getInstrumentation()
+            .uiAutomation.windows.orEmpty()
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        val focused = windows.firstOrNull { it.isFocused } ?: windows.firstOrNull()
+        return focused?.root?.packageName?.toString()
+    }
+
+    /** Home package as the system actually routes the Home press. */
+    private fun goHomeAndWait(): String {
         device.pressHome()
-        device.wait(Until.hasObject(By.pkg(device.launcherPackageName).depth(0)), 5_000)
+        device.waitForIdle(5_000)
+        val homePackage = foregroundApplicationPackage()
+        assertNotNull("no foreground application window after Home", homePackage)
+        assertTrue(
+            "expected the home screen, got $homePackage",
+            homePackage != "io.evren.morsel",
+        )
+        device.wait(Until.hasObject(By.pkg(homePackage!!).depth(0)), 5_000)
+        return homePackage
     }
 
     private fun launchAndWaitForCard() {
@@ -35,11 +64,23 @@ class FloatingWindowTest {
         assertNotNull(device.wait(Until.hasObject(By.pkg("io.evren.morsel")), 10_000))
     }
 
-    private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+    /** Waits until the given package owns the focused application window again. */
+    private fun waitUntilForeground(homePackage: String): Boolean {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < deadline) {
+            if (foregroundApplicationPackage() == homePackage &&
+                device.currentPackageName == homePackage
+            ) {
+                return true
+            }
+            device.waitForIdle(1_000)
+        }
+        return false
+    }
 
     @Test
-    fun floatingCardIsSmallerThanDisplayOverLauncher() {
-        goHome()
+    fun floatingCardIsSmallerThanDisplayOverHome() {
+        val homePackage = goHomeAndWait()
         launchAndWaitForCard()
         val window = device.findObject(By.pkg("io.evren.morsel"))
         assertNotNull("Morsel window not found", window)
@@ -52,28 +93,35 @@ class FloatingWindowTest {
             "card height ${bounds.height()} should be smaller than display ${device.displayHeight}",
             bounds.height() in 1 until device.displayHeight,
         )
-        // The launcher is still behind the card window.
-        assertTrue(device.hasObject(By.pkg(device.launcherPackageName)))
-        Screenshots.capture("floating-over-launcher")
+        // The home screen the user came from is still alive behind the card.
+        val behind = InstrumentationRegistry.getInstrumentation().uiAutomation.windows.orEmpty()
+            .any {
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                    it.root?.packageName?.toString() == homePackage
+            }
+        assertTrue("home window $homePackage no longer alive behind the card", behind)
+        Screenshots.capture("floating-over-home")
         device.pressBack()
     }
 
     @Test
     fun backDismissesTheCard() {
-        goHome()
+        val homePackage = goHomeAndWait()
         launchAndWaitForCard()
         device.pressBack()
-        assertTrue(device.wait(Until.hasObject(By.pkg(device.launcherPackageName).depth(0)), 5_000))
-        assertEquals(device.launcherPackageName, device.currentPackageName)
+        assertTrue(
+            "card did not dismiss back to $homePackage",
+            waitUntilForeground(homePackage),
+        )
     }
 
     @Test
     fun dismissalAndReopenKeepsTheSameProcessAndCoordinator() {
-        goHome()
+        val homePackage = goHomeAndWait()
         launchAndWaitForCard()
         val pidBefore = android.os.Process.myPid()
         device.pressBack()
-        assertTrue(device.wait(Until.hasObject(By.pkg(device.launcherPackageName).depth(0)), 5_000))
+        assertTrue(waitUntilForeground(homePackage))
 
         // Reopen in the same process: the application-scoped coordinator and
         // journal survive the dismissed card untouched.
@@ -86,13 +134,16 @@ class FloatingWindowTest {
 
     @Test
     fun outsideTapDismissesWithoutTouchingWhatIsBeneath() {
-        goHome()
+        val homePackage = goHomeAndWait()
         launchAndWaitForCard()
         // Top-left corner of the screen is outside the centered card.
         device.click(10, 10)
-        assertTrue(device.wait(Until.hasObject(By.pkg(device.launcherPackageName).depth(0)), 5_000))
-        // The launcher (not the app) is foreground: the tap was absorbed, not
-        // passed through to whatever sits beneath the dim layer.
-        assertEquals(device.launcherPackageName, device.currentPackageName)
+        assertTrue(
+            "outside tap did not dismiss back to $homePackage",
+            waitUntilForeground(homePackage),
+        )
+        // The home screen is foreground: the tap was absorbed by the dim layer,
+        // never passed through to whatever sits beneath.
+        assertEquals(homePackage, device.currentPackageName)
     }
 }

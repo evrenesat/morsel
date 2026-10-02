@@ -129,4 +129,5 @@ internal class FakeGraph(
     override val realRepository = NoRepository()
     override val realCoordinator = realCoordinator
     override val demoCoordinator = demoCoordinator
+    override val realJournal = io.evren.morsel.domain.FakeJournal()
 }
