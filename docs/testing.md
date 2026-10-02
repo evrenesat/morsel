@@ -23,7 +23,7 @@ bash scripts/verify-apk.sh <apk> <cert-sha256>    # release APK check
 - acknowledged entries count as resolved when trimming; genuinely unresolved entries preserved; ≥26 acknowledged operations never break trimming;
 - restore maps persisted DISPATCHING to UNKNOWN; recreate-after-dispatch never resends; missing saved serial never substituted; offline blocks with no delayed send;
 - baseline history failure stays unconfirmed; duplicates/out-of-order/scheduled competing records never confirm; correlated mismatch never tops up; logout/rebind cannot bypass the unresolved journal;
-- ViewModel: fresh session starts at zero with Feed disabled, clamp to 0/cap, in-session Done latch, demo routing, blocked-attempt notices, read-failure preservation, cancelled dispatch reconnects as UNKNOWN with no resend.
+- ViewModel: fresh session starts at zero with Feed disabled, clamp to 0/cap, in-session Done latch attributed to the CURRENT attempt's operation id (a restored or previous-attempt success never latches — plans/review-success-attribution.md), demo routing, blocked-attempt notices, read-failure preservation, cancelled dispatch reconnects as UNKNOWN with no resend.
 
 ## Instrumented gates (emulator, `app/src/androidTest`)
 
@@ -33,13 +33,13 @@ Real production code on a device/emulator: production DataStore stores (isolated
 - `FloatingWindowTest` — genuinely floating window smaller than the display over the launcher; Back dismisses; outside tap dismisses without touching what is beneath; dismissal + reopen keeps the same process and coordinator.
 - `DemoFlowTest` — all six scenarios through the production ViewModel and coordinator: success with correlation (Done latches, Feed does not re-arm), accepted-unconfirmed (Check status + explicit acknowledgement), rejected, timeout/UNKNOWN, correlated mismatch (no automatic top-up), offline (disabled with hint). Demo banner visible; Feed disabled at zero.
 - `FailureStatusTest` — a blocked attempt shows the visible localized "nothing was sent" failure text through the production ViewModel and card.
-- `InFlightDismissReopenTest` — the single write is held on a test-only gate (`DemoFeederRepository.SendGate`), the card is dismissed mid-request, the coordinator's durable UNKNOWN is asserted, the card reopens in the same process showing the UNKNOWN panel with check-status and acknowledgement available, and exactly one send attempt is asserted continuously (no replay).
+- `InFlightDismissReopenTest` — the single write is held on a test-only gate (`DemoFeederRepository.SendGate`), the card is dismissed mid-request, the dismissal is confirmed at the window level, the coordinator's durable UNKNOWN is asserted, the card reopens in the same process and the test waits for the Morsel window to own the foreground before asserting the UNKNOWN panel with check-status and acknowledgement available, and exactly one send attempt is asserted continuously (no replay). Every `Until.hasObject` wait is asserted `== true` with a named message — `Until.hasObject` yields a Boolean, so a not-found result must fail, not slip through a null-check.
 - `LandscapeUsabilityTest` — controls stay present and reachable after a landscape recreation.
-- Visual evidence classes (API 36 visual phase): `VisualSetupTest` seeds demo mode; `ImeVisualTest` asserts the IME over the setup sign-in card via `dumpsys input_method` and captures it plus the post-Back form; `SelectionVisualTest` captures a nonzero kibble selection; `DutchVisualTest` switches the per-app locale with `LocaleManager` (API 33+) and asserts Dutch strings ON SCREEN before capturing.
+- Visual evidence classes (API 36 visual phase; all UI English-only by owner decision): `VisualSetupTest` seeds demo mode; `ImeVisualTest` asserts the IME over the setup sign-in card via `dumpsys input_method` and captures it plus the post-Back form; `SelectionVisualTest` captures a nonzero kibble selection; `DutchLocaleEnglishUiTest` switches the per-app locale with `LocaleManager` (API 33+) and asserts ENGLISH strings ON SCREEN before capturing — the app is English-only by owner decision (plans/owner-english-only.md); it ships no Dutch resources, so a Dutch system/app locale must still render English.
 
-Every capture mirrors into the logcat (`MORSEL_SHOT` base64 chunks) and is decoded by `scripts/ci-emulator.sh`, which fails the phase on missing or incomplete shots — Gradle's post-suite uninstall can no longer destroy evidence. Host screenshots (light/dark/2x font/reduced-motion/process-death relaunch) require the card to own the foreground first (`dumpsys window` check), so a launcher capture can never pass as evidence.
+Every capture reaches the host through three channels — /data/local/tmp copies written under adopted shell identity (survive Gradle's post-suite uninstall), the `MORSEL_SHOT` base64 logcat mirror, and the run-as pull — and `scripts/ci-emulator.sh` fails the phase only for shots that arrived through none of them. Host screenshots (light/dark/2x font/reduced-motion/process-death relaunch) require the card to own the foreground first (`dumpsys window` check), so a launcher capture can never pass as evidence.
 
-CI runs these on API 30 and API 36 emulators (`.github/workflows/ci.yml`, `emulator` job) and uploads XML/HTML reports, screenshots and sanitized logcat even on failure.
+CI runs these on API 30 and API 36 emulators (`.github/workflows/ci.yml`, `emulator` job, `pixel_5` hardware profile — a real-phone display, without which the card's 320dp width equals the whole 320x640@160dpi default screen) and uploads XML/HTML reports, screenshots and sanitized logcat even on failure.
 
 ## CI evidence (exact runs)
 
@@ -51,6 +51,8 @@ CI runs these on API 30 and API 36 emulators (`.github/workflows/ci.yml`, `emula
 | [36962065566](https://github.com/evrenesat/morsel/actions/runs/36962065566) | b474f43 | FAILED — 2/17 both APIs (ack kept card stuck; outside tap wrong target) |
 | [36965758511](https://github.com/evrenesat/morsel/actions/runs/36965758511) | eb3ed13 | FAILED — 3/17 both APIs; evidence pipeline still lossy |
 | [36967722345](https://github.com/evrenesat/morsel/actions/runs/36967722345) | ca3a548 | FAILED — API36 2/17, API30 3/17; failure screenshots pinpointed every race; visual P2s verified on-device (Dutch card real, 2x font clean, kibble visible) |
+| [36969353064](https://github.com/evrenesat/morsel/actions/runs/36969353064) | 49f05fa | FAILED — API36 6/17, API30 5/17 (FloatingWindow text-node bounds, InFlight reopen, DemoUnconfirmed ack on 36) |
+| [36971344588](https://github.com/evrenesat/morsel/actions/runs/36971344588) | 072f033 | FAILED — 4/17 both APIs, each root-caused from artifacts: stale-success latch (plans/review-success-attribution.md), 320x640 AVD geometry, InFlight reopen render + Boolean-wait masking, logcat mirror tail loss |
 
 ## Explicitly not tested
 

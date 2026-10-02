@@ -111,6 +111,17 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
     @Volatile
     private var dispatchMadeThisSession = false
 
+    /**
+     * The operation the current deliberate attempt sent, assigned only from
+     * submit's result. In-session success latches only for THIS operation:
+     * a success resolved from an earlier attempt (or restored from the
+     * journal) must never be presented for a new one — not even while a new
+     * attempt is still in preflight with the old success still visible as
+     * last resolved.
+     */
+    @Volatile
+    private var currentAttemptOpId: String? = null
+
     val uiState: StateFlow<FeedUiState> = combine(
         graph.settingsStore.settings,
         screen,
@@ -161,9 +172,12 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
                 }
             }
         }
-        // Latch in-session success: a REPORTED_SUCCESS reached after a deliberate
-        // dispatch in this session shows Done and does not re-arm the Feed button.
-        // A success merely restored from the journal belongs to a previous session.
+        // Latch in-session success: a REPORTED_SUCCESS reached after THIS
+        // session's deliberate dispatch shows Done and does not re-arm the
+        // Feed button. Attribution is by operation identity: a success merely
+        // restored from the journal, or one belonging to an earlier attempt,
+        // must not latch — including while a new attempt is still in
+        // preflight with the old success still the last resolved entry.
         viewModelScope.launch {
             combine(
                 realCoordinator.state,
@@ -171,9 +185,14 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
                 successThisSession,
             ) { real, demo, latched ->
                 val active = if (uiState.value.demoMode) demo else real
-                Triple(active.lastResolved?.state, active.unresolvedOperation, latched)
-            }.collect { (lastState, unresolved, latched) ->
-                if (!latched && dispatchMadeThisSession && lastState == FeedState.REPORTED_SUCCESS && unresolved == null) {
+                Triple(active.lastResolved, active.unresolvedOperation, latched)
+            }.collect { (lastResolved, unresolved, latched) ->
+                val attemptId = currentAttemptOpId
+                if (!latched && dispatchMadeThisSession && attemptId != null &&
+                    lastResolved?.id == attemptId &&
+                    lastResolved.state == FeedState.REPORTED_SUCCESS &&
+                    unresolved == null
+                ) {
                     successThisSession.value = true
                 }
             }
@@ -209,11 +228,32 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
             )
         if (!allowed) return
         dispatchMadeThisSession = true
-        // A fresh deliberate attempt clears stale feedback.
+        // A fresh deliberate attempt clears stale feedback and never inherits
+        // the previous attempt's identity.
+        currentAttemptOpId = null
         notice.value = null
         viewModelScope.launch {
             val result = (if (latestSettings.demoMode) demoCoordinator else realCoordinator).submit(portions)
             when {
+                result is SubmissionResult.Dispatched -> {
+                    currentAttemptOpId = result.operation.id
+                    // A rapidly-resolved poll may have finished before the
+                    // identity was assigned; check the latest state once so
+                    // the Done latch cannot be missed.
+                    val state = if (latestSettings.demoMode) {
+                        demoCoordinator.state.value
+                    } else {
+                        realCoordinator.state.value
+                    }
+                    if (state.lastResolved?.id == result.operation.id &&
+                        state.lastResolved?.state == FeedState.REPORTED_SUCCESS &&
+                        state.unresolvedOperation == null
+                    ) {
+                        successThisSession.value = true
+                    }
+                }
+                result is SubmissionResult.Unresolved -> currentAttemptOpId = result.operation.id
+                result is SubmissionResult.Rejected -> currentAttemptOpId = result.operation.id
                 result is SubmissionResult.Blocked -> notice.value = blockedNotice(result.reason)
                 result is SubmissionResult.JournalWriteFailed -> notice.value = R.string.blocked_journal_write
                 else -> Unit

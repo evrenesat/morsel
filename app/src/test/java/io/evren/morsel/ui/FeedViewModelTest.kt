@@ -306,4 +306,94 @@ class FeedViewModelTest {
         assertEquals(1, real.acknowledgements)
         assertEquals(1, real.submits) // nothing was resent by acknowledging
     }
+
+    @Test
+    fun `stale success never latches for a new attempt that sends nothing`() = runTest(dispatcher) {
+        runCurrent()
+        // A previous operation resolved as success (e.g. restored/journal or
+        // an earlier attempt): still the last resolved entry.
+        real.state.value = CoordinatorState(
+            lastResolved = FeedOperation("op-old", "SN", 3, "req-old", 1, FeedState.REPORTED_SUCCESS),
+        )
+        runCurrent()
+
+        // A new deliberate attempt whose preflight holds, then fails offline.
+        real.submitGate = CompletableDeferred()
+        real.nextSubmitResult = SubmissionResult.Blocked(SubmissionResult.Blocked.Reason.OFFLINE)
+        viewModel.selectPlus()
+        viewModel.feed()
+        runCurrent()
+        // The coordinator's dispatching emission while preflight suspends:
+        // the old success is still last resolved and nothing is unresolved.
+        real.state.value = CoordinatorState(
+            dispatching = true,
+            lastResolved = FeedOperation("op-old", "SN", 3, "req-old", 1, FeedState.REPORTED_SUCCESS),
+        )
+        runCurrent()
+
+        real.submitGate!!.complete(Unit)
+        runCurrent()
+        assertEquals(1, real.submits)
+        assertEquals(R.string.blocked_offline, viewModel.uiState.value.noticeRes)
+        assertFalse("stale success must not latch", viewModel.uiState.value.successThisSession)
+        assertFalse(viewModel.uiState.value.feedEnabled) // offline blocks
+    }
+
+    @Test
+    fun `acknowledging the current accepted attempt never latches stale success`() = runTest(dispatcher) {
+        runCurrent()
+        real.state.value = CoordinatorState(
+            lastResolved = FeedOperation("op-old", "SN", 3, "req-old", 1, FeedState.REPORTED_SUCCESS),
+        )
+        runCurrent()
+        viewModel.selectPlus()
+        viewModel.feed()
+        runCurrent()
+        assertEquals("op1", viewModel.uiState.value.unresolved?.id)
+
+        viewModel.acknowledgeUnresolved()
+        runCurrent()
+        assertNull(viewModel.uiState.value.unresolved)
+        assertFalse("acknowledged current attempt is not a success", viewModel.uiState.value.successThisSession)
+        assertTrue(viewModel.uiState.value.feedEnabled)
+    }
+
+    @Test
+    fun `rapidly resolved current success still latches done`() = runTest(dispatcher) {
+        runCurrent()
+        viewModel.selectPlus()
+        viewModel.feed()
+        runCurrent()
+        // The poll resolves the current operation to success.
+        real.state.value = CoordinatorState(
+            lastResolved = FeedOperation("op1", "SN", 1, "req", 1, FeedState.REPORTED_SUCCESS),
+        )
+        runCurrent()
+        assertTrue(viewModel.uiState.value.successThisSession)
+        assertFalse(viewModel.uiState.value.feedEnabled) // Done stays latched
+    }
+
+    @Test
+    fun `success resolved before the result lands still latches done`() = runTest(dispatcher) {
+        runCurrent()
+        val op = FeedOperation("op1", "SN", 1, "req", 1, FeedState.ACCEPTED_UNCONFIRMED)
+        real.nextSubmitResult = SubmissionResult.Dispatched(op)
+        real.submitGate = CompletableDeferred()
+        viewModel.selectPlus()
+        viewModel.feed()
+        runCurrent()
+        // The poll resolves while the submit result is still in flight; the
+        // identity is not assigned yet, so nothing latches from stale state.
+        real.state.value = CoordinatorState(
+            lastResolved = op.copy(state = FeedState.REPORTED_SUCCESS),
+        )
+        runCurrent()
+        assertFalse(viewModel.uiState.value.successThisSession)
+
+        // The result lands; assigning the identity observes the latest state
+        // and latches the Done panel for the genuinely current operation.
+        real.submitGate!!.complete(Unit)
+        runCurrent()
+        assertTrue(viewModel.uiState.value.successThisSession)
+    }
 }

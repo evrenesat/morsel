@@ -88,7 +88,12 @@ class FloatingWindowTest {
         context.startActivity(
             Intent(context, FeedPopupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-        assertNotNull(device.wait(Until.hasObject(By.pkg("io.evren.morsel")), 10_000))
+        // Until.hasObject yields a Boolean: assert TRUE, not non-null —
+        // assertNotNull would also accept a plain `false` (not found).
+        assertTrue(
+            "morsel card window never appeared after launch",
+            device.wait(Until.hasObject(By.pkg("io.evren.morsel")), 10_000) == true,
+        )
         // The wrapping window can be measured while its content is still
         // composing, so a bounds read right after launch races the first
         // layout (an earlier run tapped (28,80) against a near-empty window).

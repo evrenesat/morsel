@@ -107,6 +107,25 @@ class InFlightDismissReopenTest {
         prepareDemo(graph, DemoScenario.TIMEOUT_UNKNOWN)
     }
 
+    /** Package of the focused application window right now. */
+    private fun foregroundApplicationPackage(): String? {
+        val windows = InstrumentationRegistry.getInstrumentation()
+            .uiAutomation.windows.orEmpty()
+            .filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+        val focused = windows.firstOrNull { it.isFocused } ?: windows.firstOrNull()
+        return focused?.root?.packageName?.toString()
+    }
+
+    /** Waits until the given package owns the focused application window. */
+    private fun awaitForeground(pkg: String, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (foregroundApplicationPackage() == pkg) return true
+            Thread.sleep(200)
+        }
+        return foregroundApplicationPackage() == pkg
+    }
+
     @Test
     fun dismissedInFlightRequestIsStillBlockingAfterReopen() {
         val attemptsBefore = graph.demoRepository.sendAttempts.get()
@@ -131,10 +150,16 @@ class InFlightDismissReopenTest {
         // Dismiss the card WHILE the request is still pending. The submitting
         // scope dies with the card; the coordinator records UNKNOWN durably.
         device.pressBack()
+        // The dismissed card must actually leave before the reopen, or the
+        // relaunch races the finishing window (a stale first window must not
+        // decide this test's outcome).
+        assertTrue(
+            "dismissed card never left the foreground",
+            awaitForeground("com.google.android.apps.nexuslauncher", 10_000),
+        )
 
         // Wait for the durable UNKNOWN to actually land before reopening, so
-        // the reopened card observes steady state (a stale match against the
-        // closing first window must not decide this test's outcome).
+        // the reopened card observes steady state.
         val unknownDeadline = System.currentTimeMillis() + 10_000
         while (graph.demoCoordinator.state.value.unresolvedOperation?.state != FeedState.UNKNOWN &&
             System.currentTimeMillis() < unknownDeadline
@@ -157,12 +182,24 @@ class InFlightDismissReopenTest {
         context.startActivity(
             Intent(context, FeedPopupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
+        assertTrue(
+            "reopened card never reached the foreground",
+            awaitForeground("io.evren.morsel", 10_000),
+        )
+        // Until.hasObject yields a Boolean: a plain not-found must FAIL the
+        // wait, not slip through a null-check that only catches timeouts.
         val unknown = context.getString(R.string.unknown_body)
-        assertNotNull(device.wait(Until.hasObject(By.text(unknown)), 10_000))
+        assertTrue(
+            "reopened card does not show the UNKNOWN body",
+            device.wait(Until.hasObject(By.text(unknown)), 10_000) == true,
+        )
         assertEquals(pidBefore, android.os.Process.myPid())
         // Check status AND acknowledgement stay available for this outcome.
         val ackAvailable = context.getString(R.string.i_checked_the_feeder)
-        assertNotNull(device.wait(Until.hasObject(By.text(ackAvailable)), 5_000))
+        assertTrue(
+            "acknowledgement control not found after reopen",
+            device.wait(Until.hasObject(By.text(ackAvailable)), 5_000) == true,
+        )
 
         // A user status check reconciles read-only; no second request may
         // appear while it runs or after it.
@@ -175,7 +212,10 @@ class InFlightDismissReopenTest {
             assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
             Thread.sleep(50)
         }
-        assertNotNull(device.wait(Until.hasObject(By.text(unknown)), 5_000))
+        assertTrue(
+            "UNKNOWN panel vanished after a read-only status check",
+            device.wait(Until.hasObject(By.text(unknown)), 5_000) == true,
+        )
         assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
         Screenshots.capture("inflight-dismiss-reopen")
     }
@@ -212,13 +252,14 @@ class SelectionVisualTest {
 }
 
 /**
- * Visual evidence: per-app locale control (API 33+) actually switches the card
- * to Dutch, asserted BEFORE the capture — a screenshot of English text is
- * never acceptable Dutch evidence (visual review, run 36962065566).
+ * English-only proof: under a Dutch per-app locale (API 33+) the card still
+ * renders ENGLISH strings — the app ships no Dutch resources by owner
+ * decision — asserted BEFORE the capture. A localized-Dutch card would fail
+ * this test (owner correction, plans/owner-english-only.md).
  * Runs only in the API 36 visual phase.
  */
 @RunWith(AndroidJUnit4::class)
-class DutchVisualTest {
+class DutchLocaleEnglishUiTest {
 
     @get:Rule
     val compose = createAndroidComposeRule<FeedPopupActivity>()
@@ -230,7 +271,7 @@ class DutchVisualTest {
         get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    fun dutchCardShowsLocalizedStrings() {
+    fun dutchLocaleStillShowsEnglishStrings() {
         org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 33)
         prepareDemo(
             (context.applicationContext as MorselApplication).graph,
@@ -239,7 +280,7 @@ class DutchVisualTest {
         val localeManager = context.getSystemService(android.app.LocaleManager::class.java)
         localeManager.applicationLocales = android.os.LocaleList.forLanguageTags("nl-NL")
         try {
-            // Dutch strings must exist on screen before anything is captured.
+            // English strings must be on screen even under the Dutch locale.
             compose.waitUntil(15_000) {
                 compose.onAllNodesWithText(context.getString(R.string.food_time))
                     .fetchSemanticsNodes()
@@ -251,7 +292,7 @@ class DutchVisualTest {
                     context.resources.getQuantityString(R.plurals.portions, 0, 0),
                 ).fetchSemanticsNodes().isNotEmpty()
             }
-            Screenshots.capture("dutch-card")
+            Screenshots.capture("dutch-locale-english-card")
         } finally {
             localeManager.applicationLocales = android.os.LocaleList.getEmptyLocaleList()
         }

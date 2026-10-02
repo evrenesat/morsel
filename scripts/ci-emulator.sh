@@ -5,7 +5,7 @@
 #          afterwards, so nothing after this phase may assume gradle state;
 #          in-app screenshots survive via the /data/local/tmp mirror that
 #          Screenshots.kt writes during every capture).
-# Phase 2: visual evidence (light/dark/large-font/Dutch/IME/reduced-motion)
+# Phase 2: visual evidence (light/dark/large-font/Dutch-locale-English/IME/reduced-motion)
 #          via adb, on a demo-mode card. Setup failures fail the phase —
 #          screenshots of the launcher are never accepted as evidence.
 # Phases 3-5: process death — seed a persisted pending operation through the
@@ -85,7 +85,7 @@ if [ -n "${MORSEL_TEST_CMD:-}" ]; then
     fi
 else
     if ! ./gradlew --no-daemon connectedDebugAndroidTest \
-        -Pandroid.testInstrumentationRunnerArguments.notClass=io.evren.morsel.ProcessDeathVerifyTest,io.evren.morsel.ProcessDeathSetupTest,io.evren.morsel.VisualSetupTest,io.evren.morsel.ImeVisualTest,io.evren.morsel.SelectionVisualTest,io.evren.morsel.DutchVisualTest; then
+        -Pandroid.testInstrumentationRunnerArguments.notClass=io.evren.morsel.ProcessDeathVerifyTest,io.evren.morsel.ProcessDeathSetupTest,io.evren.morsel.VisualSetupTest,io.evren.morsel.ImeVisualTest,io.evren.morsel.SelectionVisualTest,io.evren.morsel.DutchLocaleEnglishUiTest; then
         overall=1
     fi
 fi
@@ -114,7 +114,7 @@ if [ "${MORSEL_VISUAL:-0}" = "1" ]; then
     if ! run_class io.evren.morsel.SelectionVisualTest instrument-selection.log; then
         visual_ok=0
     fi
-    if ! run_class io.evren.morsel.DutchVisualTest instrument-dutch.log; then
+    if ! run_class io.evren.morsel.DutchLocaleEnglishUiTest instrument-dutch.log; then
         visual_ok=0
     fi
 
@@ -193,10 +193,23 @@ fi
 adb logcat -d > connected-logcat.txt || overall=1
 screenshot emulator-final.png || overall=1
 
-# In-app screenshots arrive through the MORSEL_SHOT logcat mirror (works even
-# for the gradle phase, whose APK is uninstalled and wiped afterwards); the
-# run-as pull covers anything that only exists after a later reinstall.
+# In-app screenshots arrive through three channels; fill morsel-screens/ from
+# all of them before judging completeness:
+#   1. /data/local/tmp copies (shell identity; survive gradle's uninstall and
+#      every later phase) — pulled FIRST so the logcat decoder's incomplete
+#      check only fails for shots that arrived through NO channel;
+#   2. the MORSEL_SHOT logcat mirror (decoded from both dumps, deduplicated);
+#   3. the run-as pull for files that only exist after a later reinstall.
 mkdir -p morsel-screens
+if adb shell ls /data/local/tmp/morsel-screens > shots-localtmp.list 2> shots-err.txt; then
+    tr -d '\r' < shots-localtmp.list | while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        [ -s "morsel-screens/$f" ] && continue
+        adb shell "cat '/data/local/tmp/morsel-screens/$f'" > "morsel-screens/$f" || true
+    done
+else
+    echo "note: no /data/local/tmp screenshot listing: $(cat shots-err.txt)" >&2
+fi
 for name in connected-logcat.txt connected-logcat-phase1.txt; do
     [ -f "$name" ] || continue
     python3 - "$name" <<'PYEOF' || overall=1

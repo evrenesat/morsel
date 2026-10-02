@@ -1,7 +1,7 @@
 # Morsel
 A small native Android floating card for selecting portions and explicitly requesting food from one Petlibro Air Smart Feeder (PLAF108).
 
-Implementation follows [the implementation plan](plans/implementation.md) and [status](docs/implementation-status.md). CI runs static checks, unit tests and a full instrumented suite on API 30/36 emulators with uploaded XML, screenshots and phase logs; visual acceptance evidence (light/dark/2x font/Dutch/landscape/IME/reduced-motion) is captured on-device on every run. No physical feeder/account or Galaxy S21 validation has been performed.
+Implementation follows [the implementation plan](plans/implementation.md) and [status](docs/implementation-status.md). CI runs static checks, unit tests and a full instrumented suite on API 30/36 emulators with uploaded XML, screenshots and phase logs; visual acceptance evidence (light/dark/2x font/Dutch-locale-English/landscape/IME/reduced-motion) is captured on-device on every run. No physical feeder/account or Galaxy S21 validation has been performed.
 
 Kotlin, Jetpack Compose, OkHttp, coroutines and DataStore; Android 11+. One app module, no backend, Home Assistant, overlay permission, schedules or automatic feeding retries.
 

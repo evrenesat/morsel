@@ -106,6 +106,10 @@ jobs:
           api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
+          # A real phone profile: with no profile the AVD is 320x640@160dpi,
+          # where the card's 320dp width EQUALS the display width and the
+          # smaller-than-display / outside-tap geometry tests are unsatisfiable.
+          profile: pixel_5
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash scripts/ci-emulator.sh
@@ -122,7 +126,7 @@ jobs:
             connected-logcat-phase1.txt
             emulator-final.png
             instrument-*.log
-            shots.list
+            shots*.list
             morsel-screens/
             morsel-screens-host/
           if-no-files-found: warn
