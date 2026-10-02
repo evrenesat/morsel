@@ -68,18 +68,22 @@ screenshot() {
     return 0
 }
 
+# The logcat carries the MORSEL_SHOT screenshot mirror (see Screenshots.kt);
+# the default ~256KB buffer would rotate it away within seconds.
+adb logcat -G 8M || overall=1
 # Stale evidence from earlier runs on the same emulator must never mix in.
-adb shell rm -rf /data/local/tmp/morsel-screens || overall=1
+adb shell rm -rf /data/local/tmp/morsel-screens || true
 
-# Phase 1: full suite (process-death pair, visual seed and IME run in their
-# own phases below so a real restart is never masked by a gradle reinstall).
+# Phase 1: full suite (process-death pair, visual seed and visual-only
+# classes run in their own phases below so a real restart is never masked by
+# a gradle reinstall).
 if [ -n "${MORSEL_TEST_CMD:-}" ]; then
     if ! bash -c "$MORSEL_TEST_CMD"; then
         overall=1
     fi
 else
     if ! ./gradlew --no-daemon connectedDebugAndroidTest \
-        -Pandroid.testInstrumentationRunnerArguments.notClass=io.evren.morsel.ProcessDeathVerifyTest,io.evren.morsel.ProcessDeathSetupTest,io.evren.morsel.VisualSetupTest,io.evren.morsel.ImeVisualTest; then
+        -Pandroid.testInstrumentationRunnerArguments.notClass=io.evren.morsel.ProcessDeathVerifyTest,io.evren.morsel.ProcessDeathSetupTest,io.evren.morsel.VisualSetupTest,io.evren.morsel.ImeVisualTest,io.evren.morsel.SelectionVisualTest,io.evren.morsel.DutchVisualTest; then
         overall=1
     fi
 fi
@@ -89,7 +93,10 @@ fi
 adb install -r "$APP_APK" || overall=1
 adb install -r "$TEST_APK" || overall=1
 
-# Phase 2: visual evidence on a demo-mode card (opt-in, API 36 job).
+# Phase 2: visual evidence (opt-in, API 36 job). The Dutch locale, nonzero
+# selection and IME evidence come from instrumentation classes that ASSERT the
+# expected screen before capturing; the shell shots cover light/dark/font/
+# reduced-motion with a foreground check before each capture.
 if [ "${MORSEL_VISUAL:-0}" = "1" ]; then
     mkdir -p morsel-screens-host
     visual_ok=1
@@ -97,6 +104,12 @@ if [ "${MORSEL_VISUAL:-0}" = "1" ]; then
         visual_ok=0
     fi
     if ! run_class io.evren.morsel.ImeVisualTest instrument-ime.log; then
+        visual_ok=0
+    fi
+    if ! run_class io.evren.morsel.SelectionVisualTest instrument-selection.log; then
+        visual_ok=0
+    fi
+    if ! run_class io.evren.morsel.DutchVisualTest instrument-dutch.log; then
         visual_ok=0
     fi
 
@@ -145,25 +158,13 @@ if [ "${MORSEL_VISUAL:-0}" = "1" ]; then
         echo "FAIL: could not re-enable animations" >&2
         visual_ok=0
     fi
-
-    if ! adb shell cmd locale set-locales nl-NL; then
-        echo "FAIL: could not switch to Dutch locale" >&2
-        visual_ok=0
-    fi
-    sleep 3
-    wait_morsel_foreground || visual_ok=0
-    screenshot morsel-screens-host/dutch-card.png || visual_ok=0
-    if ! adb shell cmd locale set-locales en-US; then
-        echo "FAIL: could not restore the en-US locale" >&2
-        visual_ok=0
-    fi
-    sleep 1
     if [ "$visual_ok" = "0" ]; then
         overall=1
     fi
 fi
 
 # Phases 3-5: process death with a REAL restart.
+mkdir -p morsel-screens-host
 if run_class io.evren.morsel.ProcessDeathSetupTest instrument-setup.log; then
     if ! adb shell am force-stop io.evren.morsel; then
         echo "FAIL: could not force-stop the app" >&2
@@ -187,18 +188,51 @@ fi
 adb logcat -d > connected-logcat.txt || overall=1
 screenshot emulator-final.png || overall=1
 
-# In-app screenshots (success and failure captures, see Screenshots.kt): the
-# /data/local/tmp mirror survives Gradle's uninstall, and run-as covers any
-# capture that only exists after a later reinstall.
+# In-app screenshots arrive through the MORSEL_SHOT logcat mirror (works even
+# for the gradle phase, whose APK is uninstalled and wiped afterwards); the
+# run-as pull covers anything that only exists after a later reinstall.
 mkdir -p morsel-screens
-if adb shell test -d /data/local/tmp/morsel-screens; then
-    if ! adb pull /data/local/tmp/morsel-screens/. morsel-screens/ > /dev/null; then
-        echo "FAIL: could not pull the screenshot mirror" >&2
-        overall=1
-    fi
-else
-    echo "note: no /data/local/tmp screenshot mirror was created" >&2
-fi
+python3 - <<'PYEOF' || overall=1
+import base64
+import pathlib
+import re
+import sys
+
+shots = {}
+begin = re.compile(r"BEGIN:([A-Za-z0-9._-]+):(\d+)$")
+chunk = re.compile(r"CHUNK:([A-Za-z0-9._-]+):(\d+):([A-Za-z0-9+/=]+)$")
+end = re.compile(r"END:([A-Za-z0-9._-]+)$")
+for line in open("connected-logcat.txt", encoding="utf-8", errors="replace"):
+    if "MORSEL_SHOT:" not in line:
+        continue
+    body = line.split("MORSEL_SHOT:", 1)[1].strip()
+    b = begin.match(body)
+    c = chunk.match(body)
+    if b:
+        shots[b.group(1)] = [""] * int(b.group(2))
+    elif c and c.group(1) in shots:
+        i = int(c.group(2))
+        if i < len(shots[c.group(1)]):
+            shots[c.group(1)][i] = c.group(3)
+    # END markers need no action: the shot is complete once all chunks arrived.
+out = pathlib.Path("morsel-screens")
+written = 0
+incomplete = 0
+for name, parts in shots.items():
+    if not parts or any(p == "" for p in parts):
+        incomplete += 1
+        print(f"FAIL: incomplete logcat mirror for {name}", file=sys.stderr)
+        continue
+    (out / f"{name}.png").write_bytes(base64.b64decode("".join(parts)))
+    written += 1
+print(f"logcat mirror: {written} screenshot(s) decoded, {incomplete} incomplete")
+if incomplete:
+    sys.exit(1)
+if not shots:
+    print("FAIL: no MORSEL_SHOT mirror entries found in logcat", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0)
+PYEOF
 if adb shell run-as io.evren.morsel ls files/morsel-screens > shots.list 2> shots-err.txt; then
     tr -d '\r' < shots.list | while IFS= read -r f; do
         [ -n "$f" ] || continue

@@ -39,14 +39,19 @@ class FeedPopupActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Explicit (not just theme-derived): PhoneWindow only reads
-        // windowCloseOnTouchOutside from a theme after the code has opted in,
-        // so a tap outside the floating card would otherwise never finish the
-        // activity. With windowIsFloating the window stays touch-modal only
-        // inside its frame; outside touches raise ACTION_OUTSIDE, finish the
-        // card, and are absorbed by the dim layer (never passed through to
-        // the launcher beneath).
+        // Outside taps only finish this activity if the window actually
+        // receives them. Activity.onTouchEvent -> Window.shouldCloseOnTouch
+        // acts on ACTION_OUTSIDE, but unlike dialogs nothing ever sets
+        // FLAG_WATCH_OUTSIDE_TOUCH on a floating ACTIVITY window — without it,
+        // windowCloseOnTouchOutside (theme) and setFinishOnTouchOutside stay
+        // inert. With the watch flag, a tap outside the card frame raises
+        // ACTION_OUTSIDE, the card finishes, and the dim layer keeps the tap
+        // off the launcher beneath.
         setFinishOnTouchOutside(true)
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+        )
         window.setBackgroundDrawableResource(android.R.color.transparent)
         setContent {
             val state by viewModel.uiState.collectAsStateWithLifecycle()

@@ -1,64 +1,62 @@
 package io.evren.morsel
 
 import android.graphics.Bitmap
-import android.os.ParcelFileDescriptor
+import android.util.Base64
+import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Saves screenshots into the app's INTERNAL files dir so CI can pull them with
- * `adb exec-out run-as io.evren.morsel tar ...` (the external Android/data dir
- * is not reliably readable by adb on newer APIs).
+ * Saves screenshots into the app's INTERNAL files dir (pullable with run-as
+ * for as long as the app stays installed) AND mirrors every capture into the
+ * logcat buffer under [TAG]: Gradle uninstalls the app when its connected run
+ * ends — wiping internal storage — but the device logcat survives, and
+ * scripts/ci-emulator.sh decodes the MORSEL_SHOT stream into PNGs afterwards.
  *
- * Every capture is ALSO mirrored to /data/local/tmp/morsel-screens via the
- * shell-level UiAutomation: Gradle uninstalls the app when the connected run
- * ends, wiping internal storage — the mirror survives and lets the CI script
- * collect evidence from the main suite, not just the later adb-driven phases.
+ * Logcat entries are capped at ~4KB, so the base64 body travels in numbered
+ * chunks with BEGIN/END markers per screenshot. The mirror is best-effort; a
+ * failure never fails the test itself.
  */
 object Screenshots {
 
-    private const val MIRROR_DIR = "/data/local/tmp/morsel-screens"
+    private const val TAG = "MORSEL_SHOT"
+    private const val CHUNK_B64 = 1800
 
     fun capture(name: String) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val dir = File(context.filesDir, "morsel-screens")
         captureInto(dir, name)
-        mirror(name)
+        mirrorViaLogcat(dir, name)
     }
 
     private fun captureInto(dir: File, name: String) {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val shot: Bitmap = automation.takeScreenshot()
         dir.mkdirs()
-        val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "-")
+        val safe = sanitize(name)
         val out = File(dir, "$safe.png")
         FileOutputStream(out).use { shot.compress(Bitmap.CompressFormat.PNG, 100, it) }
         shot.recycle()
     }
 
-    /** Best-effort duplication; a failed mirror never fails the test itself. */
-    private fun mirror(name: String) {
+    private fun mirrorViaLogcat(dir: File, rawName: String) {
         runCatching {
-            val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "-")
-            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-            shell("mkdir -p $MIRROR_DIR")
-            shell(
-                "run-as io.evren.morsel cat " +
-                    "/data/user/0/io.evren.morsel/files/morsel-screens/$safe.png" +
-                    " > $MIRROR_DIR/$safe.png",
-            )
+            val safe = sanitize(rawName)
+            val b64 = Base64.encodeToString(File(dir, "$safe.png").readBytes(), Base64.NO_WRAP)
+            val chunks = (b64.length + CHUNK_B64 - 1) / CHUNK_B64
+            Log.i(TAG, "BEGIN:$safe:$chunks")
+            for (i in 0 until chunks) {
+                val from = i * CHUNK_B64
+                Log.i(TAG, "CHUNK:$safe:$i:" + b64.substring(from, minOf(from + CHUNK_B64, b64.length)))
+            }
+            Log.i(TAG, "END:$safe")
         }.onFailure {
-            println("morsel-screens: mirror of $name failed: $it")
+            println("morsel-screens: logcat mirror of $rawName failed: $it")
         }
     }
 
-    /** Runs one shell command to completion (drains its stdout). */
-    private fun shell(command: String) {
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command))
-            .use { it.readBytes() }
-    }
+    private fun sanitize(name: String) = name.replace(Regex("[^A-Za-z0-9._-]"), "-")
 }
 
 /**

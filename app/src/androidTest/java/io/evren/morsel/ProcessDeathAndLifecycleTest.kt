@@ -5,6 +5,7 @@ import android.content.pm.ActivityInfo
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -141,8 +142,9 @@ class InFlightDismissReopenTest {
         // A user status check reconciles read-only; no second request may
         // appear while it runs or after it.
         val checkStatus = context.getString(R.string.check_status)
-        assertNotNull(device.wait(Until.hasObject(By.text(checkStatus)), 5_000))
-        device.findObject(By.text(checkStatus)).click()
+        val checkButton = device.wait(Until.findObject(By.text(checkStatus)), 5_000)
+        assertNotNull("check-status button not found after reopen", checkButton)
+        checkButton!!.click()
         val quietDeadline = System.currentTimeMillis() + 2_000
         while (System.currentTimeMillis() < quietDeadline) {
             assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
@@ -151,6 +153,83 @@ class InFlightDismissReopenTest {
         assertNotNull(device.wait(Until.hasObject(By.text(unknown)), 5_000))
         assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
         Screenshots.capture("inflight-dismiss-reopen")
+    }
+}
+
+/**
+ * Visual evidence: a nonzero selection must be visible as kibble in the cup
+ * (review follow-up: selection evidence at the default font scale).
+ * Runs only in the API 36 visual phase (see scripts/ci-emulator.sh).
+ */
+@RunWith(AndroidJUnit4::class)
+class SelectionVisualTest {
+
+    @get:Rule
+    val compose = createAndroidComposeRule<FeedPopupActivity>()
+
+    @get:Rule
+    val failureScreenshot = FailureScreenshotRule()
+
+    private val context
+        get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test
+    fun selectionShowsKibbleInCup() {
+        prepareDemo(
+            (context.applicationContext as MorselApplication).graph,
+            DemoScenario.SUCCESS_CORRELATED,
+        )
+        compose.onNodeWithTag(Tags.PLUS).performClick()
+        compose.onNodeWithTag(Tags.PLUS).performClick()
+        compose.onNodeWithTag(Tags.COUNT).assertExists()
+        Screenshots.capture("demo-selection")
+    }
+}
+
+/**
+ * Visual evidence: per-app locale control (API 33+) actually switches the card
+ * to Dutch, asserted BEFORE the capture — a screenshot of English text is
+ * never acceptable Dutch evidence (visual review, run 36962065566).
+ * Runs only in the API 36 visual phase.
+ */
+@RunWith(AndroidJUnit4::class)
+class DutchVisualTest {
+
+    @get:Rule
+    val compose = createAndroidComposeRule<FeedPopupActivity>()
+
+    @get:Rule
+    val failureScreenshot = FailureScreenshotRule()
+
+    private val context
+        get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test
+    fun dutchCardShowsLocalizedStrings() {
+        org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 33)
+        prepareDemo(
+            (context.applicationContext as MorselApplication).graph,
+            DemoScenario.SUCCESS_CORRELATED,
+        )
+        val localeManager = context.getSystemService(android.app.LocaleManager::class.java)
+        localeManager.applicationLocales = android.os.LocaleList.forLanguageTags("nl-NL")
+        try {
+            // Dutch strings must exist on screen before anything is captured.
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithText(context.getString(R.string.food_time))
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            compose.onNodeWithText(context.getString(R.string.food_time)).assertExists()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText(
+                    context.resources.getQuantityString(R.plurals.portions, 0, 0),
+                ).fetchSemanticsNodes().isNotEmpty()
+            }
+            Screenshots.capture("dutch-card")
+        } finally {
+            localeManager.applicationLocales = android.os.LocaleList.getEmptyLocaleList()
+        }
     }
 }
 

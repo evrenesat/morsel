@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -33,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -195,10 +198,14 @@ private fun SceneArea(state: FeedUiState) {
         state.lastResolved?.state == FeedState.REPORTED_SUCCESS -> CupState.POURING
         else -> CupState.PORTIONS
     }
+    // Canvas scenes have no intrinsic height: give the row a definite,
+    // bounded height (reduced on short/constrained layouts, where the card
+    // scrolls) so both scenes actually have room to draw.
+    val sceneHeight = if (LocalConfiguration.current.screenHeightDp < 480) 84.dp else 120.dp
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 96.dp, max = 170.dp),
+            .height(sceneHeight),
         verticalAlignment = Alignment.Bottom,
     ) {
         CatScene(
@@ -207,7 +214,9 @@ private fun SceneArea(state: FeedUiState) {
             furSoft = morselFurSoft(),
             accent = MaterialTheme.colorScheme.primary,
             onFur = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.weight(1.1f),
+            modifier = Modifier
+                .weight(1.1f)
+                .fillMaxHeight(),
         )
         CupScene(
             state = cupState,
@@ -216,7 +225,9 @@ private fun SceneArea(state: FeedUiState) {
             cupRim = MaterialTheme.colorScheme.primaryContainer,
             kibble = MorselArt.Kibble,
             kibbleDark = MorselArt.KibbleDark,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
         )
     }
 }
@@ -238,34 +249,52 @@ private fun CounterRow(
     haptic: (HapticFeedbackType) -> Unit,
 ) {
     val enabled = state.canChangeSelection
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        CounterButton(
-            label = stringResource(R.string.a11y_minus),
-            symbol = stringResource(R.string.minus_symbol),
-            enabled = enabled && state.selection > 0,
-            onClick = {
-                haptic(HapticFeedbackType.TextHandleMove)
-                onMinus()
-            },
-            tag = Tags.MINUS,
-        )
+    // The narrow counter row carries the bare number only: at large font
+    // scales a "%d portions" label would break mid-word. The full localized
+    // quantity sits on its own full-width line, and TalkBack still hears the
+    // complete plural via the count's content description.
+    val countQuantity = pluralStringResource(R.plurals.portions, state.selection, state.selection)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CounterButton(
+                label = stringResource(R.string.a11y_minus),
+                symbol = stringResource(R.string.minus_symbol),
+                enabled = enabled && state.selection > 0,
+                onClick = {
+                    haptic(HapticFeedbackType.TextHandleMove)
+                    onMinus()
+                },
+                tag = Tags.MINUS,
+            )
+            Text(
+                text = "${state.selection}",
+                style = MaterialTheme.typography.headlineMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = countQuantity }
+                    .testTag(Tags.COUNT),
+            )
+            CounterButton(
+                label = stringResource(R.string.a11y_plus),
+                symbol = stringResource(R.string.plus_symbol),
+                enabled = enabled && state.selection < state.cap,
+                onClick = {
+                    haptic(HapticFeedbackType.TextHandleMove)
+                    onPlus()
+                },
+                tag = Tags.PLUS,
+            )
+        }
         Text(
-            text = pluralStringResource(R.plurals.portions, state.selection, state.selection),
-            style = MaterialTheme.typography.headlineMedium,
+            text = countQuantity,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
-            modifier = Modifier
-                .weight(1f)
-                .testTag(Tags.COUNT),
-        )
-        CounterButton(
-            label = stringResource(R.string.a11y_plus),
-            symbol = stringResource(R.string.plus_symbol),
-            enabled = enabled && state.selection < state.cap,
-            onClick = {
-                haptic(HapticFeedbackType.TextHandleMove)
-                onPlus()
-            },
-            tag = Tags.PLUS,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
