@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original Morsel artwork: a minimal fluffy cat face. Drawn for this project; do not
+     copy third-party art. Safe zone: circle of radius 33 centered at (54,54) in this
+     108x108 viewport. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- ears -->
+    <path
+        android:fillColor="#E8A87C"
+        android:pathData="M33,41 L28,22 L45,32 Z" />
+    <path
+        android:fillColor="#E8A87C"
+        android:pathData="M75,41 L80,22 L63,32 Z" />
+
+    <!-- head -->
+    <path
+        android:fillColor="#8C6A4F"
+        android:pathData="M54,30 C70,30 80,42 80,56 C80,72 68,82 54,82 C40,82 28,72 28,56 C28,42 38,30 54,30 Z" />
+
+    <!-- eyes -->
+    <path
+        android:fillColor="#F5EFE2"
+        android:pathData="M43,53 a4.5,6 0 1,0 9,0 a4.5,6 0 1,0 -9,0 Z" />
+    <path
+        android:fillColor="#F5EFE2"
+        android:pathData="M56,53 a4.5,6 0 1,0 9,0 a4.5,6 0 1,0 -9,0 Z" />
+    <path
+        android:fillColor="#2E2A26"
+        android:pathData="M45.5,53 a2,3 0 1,0 4,0 a2,3 0 1,0 -4,0 Z" />
+    <path
+        android:fillColor="#2E2A26"
+        android:pathData="M58.5,53 a2,3 0 1,0 4,0 a2,3 0 1,0 -4,0 Z" />
+
+    <!-- nose and mouth -->
+    <path
+        android:fillColor="#F5EFE2"
+        android:pathData="M51.5,63 L56.5,63 L54,66.5 Z" />
+    <path
+        android:strokeColor="#F5EFE2"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,66.5 C54,69 51,70 49,68.8 M54,66.5 C54,69 57,70 59,68.8" />
+
+    <!-- whiskers -->
+    <path
+        android:strokeColor="#F5EFE2"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M38,60 L30,58 M38,64 L30,65 M70,60 L78,58 M70,64 L78,65" />
+</vector>

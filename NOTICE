@@ -1,0 +1,24 @@
+# Morsel — portions, on purpose.
+
+Copyright (C) 2026 Evren Ozkan
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE.
+
+## Attribution
+
+Morsel adapts protocol knowledge from the independent, GPL-3.0 licensed
+Home Assistant integration `jjjonesjr33/petlibro`
+(https://github.com/jjjonesjr33/petlibro, pinned commit
+7ee757fa8f76f628af2e845a301335656e9919a1). That project's source was used as a
+reference for request/response field names only; no code was copied. Morsel is
+an independent work and is not affiliated with, endorsed by, or connected to
+PETLIBRO. See docs/api-contract.md for the documented protocol observations and
+permalinks.
+
+## Artwork
+
+All artwork (cat, cup, kibble, bowl; launcher icon) is original vector/Canvas
+work created for Morsel. See docs/artwork.md.
