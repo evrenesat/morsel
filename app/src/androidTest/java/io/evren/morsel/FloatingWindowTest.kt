@@ -62,6 +62,22 @@ class FloatingWindowTest {
             Intent(context, FeedPopupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
         assertNotNull(device.wait(Until.hasObject(By.pkg("io.evren.morsel")), 10_000))
+        // The wrapping window can be measured while its content is still
+        // composing, so a bounds read right after launch races the first
+        // layout (an earlier run tapped (28,80) against a near-empty window).
+        // Wait until the window has its real card-sized frame.
+        val deadline = System.currentTimeMillis() + 10_000
+        var bounds = device.findObject(By.pkg("io.evren.morsel")).visibleBounds
+        while (bounds.height() < device.displayHeight / 4 &&
+            System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(200)
+            bounds = device.findObject(By.pkg("io.evren.morsel")).visibleBounds
+        }
+        assertTrue(
+            "card window never reached card size (bounds=$bounds)",
+            bounds.height() >= device.displayHeight / 4,
+        )
     }
 
     /** Waits until the given package owns the focused application window again. */

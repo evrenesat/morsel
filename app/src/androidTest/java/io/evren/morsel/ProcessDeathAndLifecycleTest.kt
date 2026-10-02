@@ -42,8 +42,13 @@ internal fun prepareDemo(graph: AppGraph, scenario: DemoScenario) {
         graph.settingsStore.setDemoScenario(scenario)
         graph.settingsStore.setDemoMode(true)
         graph.settingsStore.setOnboardingComplete(true)
+        // A stale scenario would let a poll tick reconcile the wrong history,
+        // so timing out here is a FAILURE, never a silent skip.
         val deadline = System.currentTimeMillis() + 5_000
-        while (graph.demoScenario != scenario && System.currentTimeMillis() < deadline) {
+        while (graph.demoScenario != scenario) {
+            check(System.currentTimeMillis() < deadline) {
+                "demo scenario did not switch to $scenario (still ${graph.demoScenario})"
+            }
             Thread.sleep(25)
         }
     }
@@ -125,6 +130,20 @@ class InFlightDismissReopenTest {
         // Dismiss the card WHILE the request is still pending. The submitting
         // scope dies with the card; the coordinator records UNKNOWN durably.
         device.pressBack()
+
+        // Wait for the durable UNKNOWN to actually land before reopening, so
+        // the reopened card observes steady state (a stale match against the
+        // closing first window must not decide this test's outcome).
+        val unknownDeadline = System.currentTimeMillis() + 10_000
+        while (graph.demoCoordinator.state.value.unresolvedOperation?.state != FeedState.UNKNOWN &&
+            System.currentTimeMillis() < unknownDeadline
+        ) {
+            Thread.sleep(25)
+        }
+        assertEquals(
+            FeedState.UNKNOWN,
+            graph.demoCoordinator.state.value.unresolvedOperation?.state,
+        )
 
         // Reopen in the SAME process: the application-scoped coordinator still
         // holds the conservative UNKNOWN and nothing was resent.
@@ -281,6 +300,9 @@ class ImeVisualTest {
         compose.onNodeWithTag(SetupTags.EMAIL).performClick()
 
         assertTrue("IME did not become visible over the setup card", awaitIme(true, 10_000))
+        // The IMMS reports "shown" before the keyboard surface has drawn its
+        // first frame; give it a moment so the capture is visual evidence.
+        Thread.sleep(1_500)
         Screenshots.capture("ime-setup-card")
 
         // Back dismisses the keyboard first; the form itself stays on screen.

@@ -62,9 +62,14 @@ abstract class DemoFlowBase(private val scenario: DemoScenario, private val labe
 
             // The demo repository reads the scenario through the graph's
             // settings collector; wait for the switch to land so this test's
-            // dispatch never races the previous scenario.
+            // dispatch never races the previous scenario. A stale scenario
+            // would let a poll tick confirm the wrong history, so timing out
+            // here is a FAILURE, never a silent skip.
             val deadline = System.currentTimeMillis() + 5_000
-            while (graph.demoScenario != scenario && System.currentTimeMillis() < deadline) {
+            while (graph.demoScenario != scenario) {
+                check(System.currentTimeMillis() < deadline) {
+                    "demo scenario did not switch to $scenario (still ${graph.demoScenario})"
+                }
                 Thread.sleep(25)
             }
         }

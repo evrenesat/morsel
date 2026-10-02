@@ -369,6 +369,12 @@ class FeedCoordinator(
                     // Read failures stop polling; the user's status check can repeat reads.
                     return@launch
                 }
+                // Re-check after the (suspending) read: the operation may have
+                // been acknowledged while it was in flight.
+                val active = mutableState.value.unresolvedOperation
+                if (active == null || active.id != operation.id || active.acknowledgedAtEpochMs != null) {
+                    return@launch
+                }
                 mutableState.update { it.copy(feederHistory = history) }
                 when (val conclusion = HistoryReconciler.reconcile(operation, history)) {
                     is HistoryReconciler.Conclusion.Confirmed -> {
@@ -390,16 +396,31 @@ class FeedCoordinator(
      * request means the presented state stays UNKNOWN and the journal entry
      * remains unresolved (startup recovery will map it again). Returns the
      * operation as it should be presented.
+     *
+     * A RETIRED operation — durably acknowledged, so no longer the active
+     * unresolved operation — is never rewritten, in memory or in the journal:
+     * a late outcome (e.g. a poll tick whose history read raced the
+     * acknowledgement) must not resurrect it or overwrite its recorded
+     * resolution.
      */
     private suspend fun persistOutcome(operation: FeedOperation): FeedOperation {
+        val current = state.value
+        val active = current.unresolvedOperation
+        val last = current.lastResolved
+        val retired =
+            (active != null && active.id == operation.id && active.acknowledgedAtEpochMs != null) ||
+                (active == null && last?.id == operation.id && last.acknowledgedAtEpochMs != null)
+        if (retired) {
+            return last ?: operation
+        }
         val toPresent = try {
             journal.upsert(operation)
             operation
         } catch (_: JournalPersistenceException) {
             operation.copy(state = FeedState.UNKNOWN)
         }
-        mutableState.update { current ->
-            current.copy(
+        mutableState.update { state ->
+            state.copy(
                 unresolvedOperation = if (toPresent.unresolved) {
                     toPresent
                 } else {
