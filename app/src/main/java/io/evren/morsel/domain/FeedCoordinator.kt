@@ -24,6 +24,9 @@ sealed class SubmissionResult {
             WRONG_MODEL,
             OFFLINE,
             PREFLIGHT_FAILED,
+
+            /** The operation journal could not be read; nothing may be sent. */
+            STORAGE_ERROR,
         }
     }
 
@@ -46,10 +49,16 @@ data class CoordinatorState(
     val feederHistory: List<FeederRecord> = emptyList(),
     /** True only while the single HTTP write is in flight. */
     val dispatching: Boolean = false,
+    /**
+     * Latched storage failure: the journal could not be read, so earlier
+     * operation state is unknown. All sending stays blocked until this clears
+     * (only a successful startup read clears it); nothing is reset silently.
+     */
+    val storageError: Boolean = false,
 ) {
-    /** Unresolved entries block new submissions until explicitly acknowledged. */
+    /** Unresolved entries and unreadable storage block new submissions. */
     val blocksNewSubmissions: Boolean
-        get() = unresolvedOperation?.unresolved == true
+        get() = storageError || unresolvedOperation?.unresolved == true
 }
 
 /** Contract the UI programs against; fakes implement this in tests. */
@@ -105,6 +114,9 @@ class FeedCoordinator(
         }
         try {
             mutableState.update { it.copy(dispatching = true) }
+            if (state.value.storageError) {
+                return SubmissionResult.Blocked(SubmissionResult.Blocked.Reason.STORAGE_ERROR)
+            }
             if (state.value.blocksNewSubmissions) {
                 return SubmissionResult.Blocked(SubmissionResult.Blocked.Reason.UNRESOLVED_OPERATION)
             }
@@ -202,9 +214,16 @@ class FeedCoordinator(
     /**
      * Startup recovery: a DISPATCHING entry from a previous process becomes
      * UNKNOWN and is never resent. Loads the last resolved operation too.
+     * An unreadable journal latches [CoordinatorState.storageError]: all
+     * sending blocks and the UI shows a clear status; nothing is reset.
      */
     override suspend fun restore() {
-        val all = journal.all()
+        val all = try {
+            journal.all()
+        } catch (_: JournalReadException) {
+            mutableState.update { it.copy(storageError = true) }
+            return
+        }
         val recovered = all.map {
             if (it.state == FeedState.DISPATCHING) {
                 it.copy(state = FeedState.UNKNOWN)
@@ -274,7 +293,15 @@ class FeedCoordinator(
         val op = state.value.unresolvedOperation ?: return false
         if (!op.unresolved) return false
         val acknowledged = op.copy(acknowledgedAtEpochMs = clock())
-        journal.upsert(acknowledged)
+        val recorded = try {
+            journal.upsert(acknowledged)
+            true
+        } catch (_: JournalPersistenceException) {
+            // The unresolved entry stays visible; a failed acknowledgement is
+            // never recorded as resolution.
+            false
+        }
+        if (!recorded) return false
         mutableState.update {
             it.copy(unresolvedOperation = acknowledged, lastResolved = acknowledged)
         }

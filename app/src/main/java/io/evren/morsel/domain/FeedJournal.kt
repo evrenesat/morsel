@@ -4,6 +4,12 @@ package io.evren.morsel.domain
 class JournalPersistenceException(cause: Throwable? = null) : Exception("journal write failed", cause)
 
 /**
+ * Thrown when the journal cannot be read. Unknown prior operation state must
+ * block sending; it must never be silently replaced with an empty journal.
+ */
+class JournalReadException(cause: Throwable? = null) : Exception("journal read failed", cause)
+
+/**
  * Durable operation journal. At most one unresolved operation drives the UI;
  * resolved entries are retained (bounded) and are never silently erased.
  */

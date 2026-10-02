@@ -78,7 +78,13 @@ internal class FakeJournal : FeedJournal {
     /** Fail only outcome/ack upserts (state != DISPATCHING), after a dispatch persisted. */
     var failOutcomeUpserts = false
 
-    override suspend fun all(): List<FeedOperation> = ops.toList()
+    /** Simulates unreadable storage: every read throws. */
+    var failAllReads = false
+
+    override suspend fun all(): List<FeedOperation> {
+        if (failAllReads) throw JournalReadException()
+        return ops.toList()
+    }
 
     override suspend fun upsert(operation: FeedOperation) {
         val fail = failAllUpserts ||

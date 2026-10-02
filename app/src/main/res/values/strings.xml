@@ -35,6 +35,7 @@
     <string name="success_title">Requested portions confirmed by the feeder</string>
     <string name="mismatch_body">The feeder reports %1$d portions for this request. Morsel never adds more automatically.</string>
     <string name="rejected_body">The feeder cloud rejected this request. Nothing was sent to the bowl.</string>
+    <string name="storage_error_body">Morsel cannot read its own operation journal. Feeding is blocked so nothing can be dispensed twice. Close and reopen the app; if this message stays, check the feeder itself before feeding.</string>
 
     <!-- Footer -->
     <string name="footer_idle">Morsel never queues or repeats feedings.</string>

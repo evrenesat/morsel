@@ -221,6 +221,7 @@ private fun SceneArea(state: FeedUiState) {
 }
 
 private fun sceneMood(state: FeedUiState): CatMood = when {
+    state.coordinator.storageError -> CatMood.UNSURE
     state.coordinator.dispatching -> CatMood.SENDING
     state.unresolved?.state == FeedState.ACCEPTED_UNCONFIRMED -> CatMood.WAITING
     state.unresolved != null -> CatMood.UNSURE
@@ -300,6 +301,11 @@ private fun StatusArea(
     val unresolved = state.unresolved
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         when {
+            // Unreadable journal: sending is blocked, say so plainly. No feed
+            // button is offered while earlier operation state is unknown.
+            state.coordinator.storageError -> {
+                StatusLine(stringResource(R.string.storage_error_body), Tags.STATUS)
+            }
             state.coordinator.dispatching -> {
                 CircularProgressIndicator(Modifier.size(28.dp))
                 StatusLine(stringResource(R.string.sending), Tags.STATUS)

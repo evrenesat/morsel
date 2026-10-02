@@ -316,6 +316,27 @@ class FeedCoordinatorTest {
     }
 
     @Test
+    fun `unreadable journal latches storage error and blocks all sending`() = runTest {
+        val repo = FakeRepository()
+        val journal = FakeJournal().apply { failAllReads = true }
+        val coordinator = newCoordinator(repo, journal)
+
+        coordinator.restore()
+
+        assertTrue(coordinator.state.value.storageError)
+        assertTrue(coordinator.state.value.blocksNewSubmissions)
+        val result = coordinator.submit(1)
+        assertEquals(
+            SubmissionResult.Blocked.Reason.STORAGE_ERROR,
+            (result as SubmissionResult.Blocked).reason,
+        )
+        // Blocked before any preflight: zero transport use, zero writes.
+        assertEquals(0, repo.deviceCalls.get())
+        assertEquals(0, repo.statusCalls.get())
+        assertEquals(0, repo.writeCalls.get())
+    }
+
+    @Test
     fun `acknowledgement records resolution and never erases`() = runTest {
         val repo = FakeRepository().apply { sendFeedError = FeederException.Transport("x") }
         val journal = FakeJournal()

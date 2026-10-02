@@ -35,6 +35,7 @@
     <string name="success_title">Aangevraagde porties bevestigd door de voederbak</string>
     <string name="mismatch_body">De voederbak meldt %1$d porties voor dit verzoek. Morsel voegt nooit automatisch extra toe.</string>
     <string name="rejected_body">De cloud van de voederbak heeft dit verzoek geweigerd. Er is niets naar de bak gestuurd.</string>
+    <string name="storage_error_body">Morsel kan zijn eigen journaal niet lezen. Voeren is geblokkeerd zodat er nooit twee keer voer kan vallen. Sluit de app en open hem opnieuw; blijft deze melding staan, controleer dan eerst zelf de voederbak.</string>
 
     <!-- Footer -->
     <string name="footer_idle">Morsel plaatst voedingen nooit in de wachtrij en herhaalt ze nooit.</string>
