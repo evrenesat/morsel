@@ -23,6 +23,20 @@ BUILD SUCCESSFUL in 2m 12s (57 actionable tasks)
 
 CI run: pending first push (link recorded after push).
 
+### Checkpoint 2 — domain/data layer with fault gates (this commit)
+
+Done, verified locally on p100:
+
+- `PetlibroClient` (strict envelope handling, single-shot write, redirects refused, finite timeouts, no logging of bodies), `PetlibroFeederRepository` (reads re-login once on 1009; write never retries), `AuthManager` + `CredentialStore`/`CredentialVault` (AES-GCM Keystore; instrumented Keystore tests still pending), `SettingsStore` + `DataStoreFeedJournal` (no-backup storage), `FeedCoordinator` (atomic dispatch guard, journal-before-write, restore DISPATCHING→UNKNOWN, read-only polling at 3/10/25 s with injectable timing), `HistoryReconciler` (correlation-only confirmation), `DemoFeederRepository` (six labelled scenarios, isolated from real journal/serial/credentials).
+- **59 JVM unit tests green**, covering the plan's unit gates: envelope shapes, MD5 Unicode, 0/17 rejection, exactly one write under 20 concurrent taps and under timeout/500/malformed/auth/disconnect faults, redirect refusal, journal failure before AND after the write, restore-never-resends, missing serial fail-closed, offline no delayed send, uncorrelated records never confirm, correlated mismatch no top-up, logout/rebind cannot bypass unresolved journal. Full-stack coordinator→client→MockWebServer tests included.
+
+```
+./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug
+BUILD SUCCESSFUL in 1m 6s (60 actionable tasks); tests: 59 completed, 0 failed
+```
+
+CI run: link recorded after push.
+
 ## Remaining
 
 - Step 2: protocol client, vault/stores, coordinator + journal, reconciler, unit-test gates (single-write under faults).
