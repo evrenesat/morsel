@@ -37,6 +37,23 @@ BUILD SUCCESSFUL in 1m 6s (60 actionable tasks); tests: 59 completed, 0 failed
 
 CI run: link recorded after push.
 
+### Checkpoint 3 — complete UI, art, localization, demo scenarios (this commit)
+
+Done, verified locally on p100:
+
+- `FeedPopupActivity` hosts `FeedCard` (header with cat name/gear 48dp, original Canvas cat + cup art with independent ears/tail/eyes, blinking/attention/sending/waiting/happy/unsure moods, 48dp counter buttons, Feed N portions, honest status area, quiet footer), `SetupCard` (demo route without credentials; real sign-in with session-conflict note; discovery auto-binds exactly one PLAF108, multi requires explicit pick, zero shows setup message), `SettingsCard` (cat name, lower-only cap 1..16, haptics, reduce motion, demo scenario picker, sign out).
+- Application-scoped `AppGraph` behind `MorselGraph`/`FeedingCoordinator`/`MorselSettingsStore` interfaces; real and demo worlds share nothing (separate repositories, journals, serials).
+- ViewModel actions read cached source state (no stale-UI decisions); plus/minus never reach the coordinator; feed gating includes onboarding, unresolved ops, in-session success latch, demo-offline.
+- Full English + Dutch strings incl. plurals; TalkBack labels, live region status, decorative art excluded from semantics; reduce-motion setting + system animator scale 0 both freeze decorative animation.
+- Unit tests now 68 green (8 ViewModel tests added; all previous coordinator/client/fault gates intact).
+
+```
+./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug
+BUILD SUCCESSFUL in 1m 21s (60 actionable tasks); tests: 68 completed, 0 failed
+```
+
+CI run: link recorded after push.
+
 ## Remaining
 
 - Step 2: protocol client, vault/stores, coordinator + journal, reconciler, unit-test gates (single-write under faults).

@@ -28,6 +28,27 @@ data class MorselSettings(
     val onboardingComplete: Boolean = false,
 )
 
+/** Contract for settings the UI and graph program against. */
+interface MorselSettingsStore : io.evren.morsel.domain.FeedSettingsSource {
+    val settings: Flow<MorselSettings>
+
+    suspend fun setBoundSerial(serial: String?)
+
+    suspend fun setCatName(name: String?)
+
+    suspend fun setPortionCap(cap: Int)
+
+    suspend fun setHapticsEnabled(enabled: Boolean)
+
+    suspend fun setReduceMotion(enabled: Boolean)
+
+    suspend fun setDemoMode(enabled: Boolean)
+
+    suspend fun setDemoScenario(scenario: DemoScenario)
+
+    suspend fun setOnboardingComplete(done: Boolean)
+}
+
 /**
  * Local preferences in no-backup storage. Bound serial, cat name, lower-only
  * portion cap, haptics, reduce motion, and the clearly-labelled demo settings.
@@ -37,14 +58,14 @@ data class MorselSettings(
 class SettingsStore(
     context: Context,
     scope: CoroutineScope,
-) : FeedSettingsSource {
+) : MorselSettingsStore {
 
     private val store: DataStore<androidx.datastore.preferences.core.Preferences> =
         PreferenceDataStoreFactory.create(scope = scope) {
             File(context.noBackupFilesDir, "morsel.settings_pb")
         }
 
-    val settings: Flow<MorselSettings> = store.data.map { prefs ->
+    override val settings: Flow<MorselSettings> = store.data.map { prefs ->
         MorselSettings(
             boundSerial = prefs[KEY_SERIAL],
             catName = prefs[KEY_CAT_NAME],
@@ -63,34 +84,44 @@ class SettingsStore(
         return FeedSettings(boundSerial = s.boundSerial, portionCap = s.portionCap)
     }
 
-    suspend fun setBoundSerial(serial: String?) {
+    override suspend fun setBoundSerial(serial: String?) {
         store.edit {
             if (serial == null) it.remove(KEY_SERIAL) else it[KEY_SERIAL] = serial
         }
     }
 
-    suspend fun setCatName(name: String?) {
+    override suspend fun setCatName(name: String?) {
         store.edit {
             if (name.isNullOrBlank()) it.remove(KEY_CAT_NAME) else it[KEY_CAT_NAME] = name.trim()
         }
     }
 
     /** The cap can only lower the hardware maximum, never exceed it. */
-    suspend fun setPortionCap(cap: Int) {
+    override suspend fun setPortionCap(cap: Int) {
         store.edit {
             it[KEY_CAP] = cap.coerceIn(FeedState.MIN_PORTIONS, FeedState.ABSOLUTE_MAX_PORTIONS)
         }
     }
 
-    suspend fun setHapticsEnabled(enabled: Boolean) = store.edit { it[KEY_HAPTICS] = enabled }
+    override suspend fun setHapticsEnabled(enabled: Boolean) {
+        store.edit { it[KEY_HAPTICS] = enabled }
+    }
 
-    suspend fun setReduceMotion(enabled: Boolean) = store.edit { it[KEY_REDUCE_MOTION] = enabled }
+    override suspend fun setReduceMotion(enabled: Boolean) {
+        store.edit { it[KEY_REDUCE_MOTION] = enabled }
+    }
 
-    suspend fun setDemoMode(enabled: Boolean) = store.edit { it[KEY_DEMO_MODE] = enabled }
+    override suspend fun setDemoMode(enabled: Boolean) {
+        store.edit { it[KEY_DEMO_MODE] = enabled }
+    }
 
-    suspend fun setDemoScenario(scenario: DemoScenario) = store.edit { it[KEY_DEMO_SCENARIO] = scenario.name }
+    override suspend fun setDemoScenario(scenario: DemoScenario) {
+        store.edit { it[KEY_DEMO_SCENARIO] = scenario.name }
+    }
 
-    suspend fun setOnboardingComplete(done: Boolean) = store.edit { it[KEY_ONBOARDED] = done }
+    override suspend fun setOnboardingComplete(done: Boolean) {
+        store.edit { it[KEY_ONBOARDED] = done }
+    }
 
     private companion object {
         val KEY_SERIAL = stringPreferencesKey("bound_serial")

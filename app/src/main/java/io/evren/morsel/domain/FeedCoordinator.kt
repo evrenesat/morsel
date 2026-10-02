@@ -52,6 +52,21 @@ data class CoordinatorState(
         get() = unresolvedOperation?.unresolved == true
 }
 
+/** Contract the UI programs against; fakes implement this in tests. */
+interface FeedingCoordinator {
+    val state: StateFlow<CoordinatorState>
+
+    suspend fun submit(portions: Int): SubmissionResult
+
+    suspend fun restore()
+
+    suspend fun checkStatus(): StatusCheckOutcome
+
+    suspend fun acknowledgeUnresolved(): Boolean
+
+    suspend fun unresolvedAfterRebind(): FeedOperation?
+}
+
 /**
  * Application-scoped coordinator for the one deliberate feeding action.
  *
@@ -75,16 +90,16 @@ class FeedCoordinator(
     },
     private val pollDelaysMs: List<Long> = listOf(3_000L, 10_000L, 25_000L),
     private val pollDelay: suspend (Long) -> Unit = { delay(it) },
-) {
+) : FeedingCoordinator {
     private val dispatchGuard = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val mutableState = MutableStateFlow(CoordinatorState())
-    val state: StateFlow<CoordinatorState> = mutableState.asStateFlow()
+    override val state: StateFlow<CoordinatorState> = mutableState.asStateFlow()
 
     private var pollingJob: Job? = null
 
     /** Deliberate submission. One invocation results in at most one HTTP write. */
-    suspend fun submit(portions: Int): SubmissionResult {
+    override suspend fun submit(portions: Int): SubmissionResult {
         if (!dispatchGuard.compareAndSet(false, true)) {
             return SubmissionResult.IgnoredDuplicate
         }
@@ -188,7 +203,7 @@ class FeedCoordinator(
      * Startup recovery: a DISPATCHING entry from a previous process becomes
      * UNKNOWN and is never resent. Loads the last resolved operation too.
      */
-    suspend fun restore() {
+    override suspend fun restore() {
         val all = journal.all()
         val recovered = all.map {
             if (it.state == FeedState.DISPATCHING) {
@@ -214,7 +229,7 @@ class FeedCoordinator(
      * unresolved operation against current feeder history and refreshes the
      * displayed feeder history.
      */
-    suspend fun checkStatus(): StatusCheckOutcome {
+    override suspend fun checkStatus(): StatusCheckOutcome {
         val op = state.value.unresolvedOperation
         val now = clock()
         return try {
@@ -255,7 +270,7 @@ class FeedCoordinator(
      * Explicit user acknowledgement of an unresolved operation ("I checked the
      * feeder"). Records the resolution in the journal; the entry stays visible.
      */
-    suspend fun acknowledgeUnresolved(): Boolean {
+    override suspend fun acknowledgeUnresolved(): Boolean {
         val op = state.value.unresolvedOperation ?: return false
         if (!op.unresolved) return false
         val acknowledged = op.copy(acknowledgedAtEpochMs = clock())
@@ -267,7 +282,7 @@ class FeedCoordinator(
     }
 
     /** Explicit logout/rebind must surface, not hide, the unresolved operation. */
-    suspend fun unresolvedAfterRebind(): FeedOperation? = state.value.unresolvedOperation
+    override suspend fun unresolvedAfterRebind(): FeedOperation? = state.value.unresolvedOperation
 
     private fun schedulePolling(operation: FeedOperation) {
         pollingJob?.cancel()

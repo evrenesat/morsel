@@ -1,6 +1,90 @@
 <resources>
     <string name="app_name">Morsel</string>
-    <string name="prototype_subtitle">Floating card prototype</string>
-    <string name="prototype_body">This compact card floats over your launcher. Setup, feeding and settings arrive in the next checkpoints.</string>
-    <string name="prototype_close">Close</string>
+
+    <!-- Header -->
+    <string name="food_time">Food time</string>
+    <string name="demo_badge">DEMO</string>
+
+    <!-- Counter -->
+    <string name="minus_symbol">−</string>
+    <string name="plus_symbol">+</string>
+    <plurals name="portions">
+        <item quantity="one">%d portion</item>
+        <item quantity="other">%d portions</item>
+    </plurals>
+    <plurals name="feed_button">
+        <item quantity="one">Feed %d portion</item>
+        <item quantity="other">Feed %d portions</item>
+    </plurals>
+    <string name="a11y_plus">More portions</string>
+    <string name="a11y_minus">Fewer portions</string>
+
+    <!-- Status area -->
+    <string name="sending">Sending to the feeder…</string>
+    <string name="accepted_unconfirmed_body">The feeder cloud accepted your request. Physical dispensing is not confirmed yet.</string>
+    <string name="check_status">Check status</string>
+    <string name="done">Done</string>
+    <string name="i_checked_the_feeder">I checked the feeder</string>
+    <string name="ack_dialog_title">Mark as resolved?</string>
+    <string name="ack_dialog_body">Only mark this after you looked at the feeder. If it did not dispense yet, feeding again later could give a second portion. This note stays in the journal.</string>
+    <string name="ack_dialog_confirm">I checked — resolve</string>
+    <string name="ack_dialog_dismiss">Not yet</string>
+    <string name="unknown_body">We could not reach the feeder cloud, or the answer was unclear. Your request was not repeated. Check the feeder before feeding again.</string>
+    <string name="unknown_auth_body">The cloud rejected the sign-in for this request. Nothing was repeated. Please check status or sign in again in settings.</string>
+    <string name="success_title">Requested portions confirmed by the feeder</string>
+    <string name="mismatch_body">The feeder reports %1$d portions for this request. Morsel never adds more automatically.</string>
+    <string name="rejected_body">The feeder cloud rejected this request. Nothing was sent to the bowl.</string>
+
+    <!-- Footer -->
+    <string name="footer_idle">Morsel never queues or repeats feedings.</string>
+    <string name="feeder_history_line">Feeder history: %1$d portions, %2$s.</string>
+
+    <!-- Demo -->
+    <string name="demo_banner">Demo mode — no food is dispensed, no account is used.</string>
+    <string name="demo_offline_button">Feeder offline (demo)</string>
+
+    <!-- Setup -->
+    <string name="setup_welcome_title">Welcome to Morsel</string>
+    <string name="setup_welcome_body">One tap, one honest request to your Petlibro Air Smart Feeder. Sign in once, or try the demo first.</string>
+    <string name="setup_sign_in_button">Sign in</string>
+    <string name="setup_demo_button">Try the demo</string>
+    <string name="setup_email">Email</string>
+    <string name="setup_password">Password</string>
+    <string name="setup_sign_in_continue">Continue</string>
+    <string name="setup_session_note">If this account is also signed in on another device or in another app, the Petlibro cloud may end that session.</string>
+    <string name="setup_signing_in">Signing in…</string>
+    <string name="setup_discovering">Looking for your feeder…</string>
+    <string name="setup_found_one_title">Found your feeder</string>
+    <string name="setup_use_this_feeder">Use this feeder</string>
+    <string name="setup_refresh">Refresh</string>
+    <string name="setup_choose_title">Multiple Air Smart Feeders found — pick one</string>
+    <string name="setup_none_found">No Petlibro Air Smart Feeder (PLAF108) is linked to this account. Check that the feeder is set up in the Petlibro app, then try again.</string>
+    <string name="setup_retry">Try again</string>
+    <string name="setup_failed_auth">Sign-in failed. Check your email and password.</string>
+    <string name="setup_failed_network">The Petlibro cloud could not be reached. Check your connection.</string>
+    <string name="setup_failed_unexpected">Something unexpected went wrong. Please try again.</string>
+    <string name="setup_demo_note">The demo simulates a feeder: no food, no account, no network.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_cat_name">Cat name</string>
+    <string name="settings_cap_label">Portion cap: %d</string>
+    <string name="settings_cap_help">The cap can only be at or below the feeder maximum of 16.</string>
+    <string name="settings_haptics">Vibration on tap</string>
+    <string name="settings_reduce_motion">Reduce motion</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="settings_close">Close</string>
+    <string name="settings_version">Morsel %s</string>
+    <string name="settings_demo_title">Demo scenario</string>
+    <string name="settings_demo_help">Scripted outcomes for the demo feeder. Nothing here touches a real device.</string>
+    <string name="settings_exit_demo">Exit demo</string>
+    <string name="demo_scenario_success">Success (confirmed by feeder)</string>
+    <string name="demo_scenario_unconfirmed">Accepted, not confirmed</string>
+    <string name="demo_scenario_rejected">Rejected by cloud</string>
+    <string name="demo_scenario_timeout">Timeout (unknown)</string>
+    <string name="demo_scenario_mismatch">Different amount</string>
+    <string name="demo_scenario_offline">Feeder offline</string>
+
+    <!-- Accessibility -->
+    <string name="a11y_settings">Settings</string>
 </resources>
