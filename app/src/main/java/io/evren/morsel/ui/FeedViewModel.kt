@@ -77,7 +77,9 @@ data class FeedUiState(
         get() = canChangeSelection && !successThisSession && !demoOffline &&
             selection in FeedState.MIN_PORTIONS..minOf(cap, FeedState.ABSOLUTE_MAX_PORTIONS)
 
-    val unresolved: FeedOperation? get() = coordinator.unresolvedOperation
+    /** The operation driving the unresolved UI; an acknowledged op counts as resolved. */
+    val unresolved: FeedOperation?
+        get() = coordinator.unresolvedOperation?.takeIf { it.unresolved }
 
     val lastResolved: FeedOperation? get() = coordinator.lastResolved
 

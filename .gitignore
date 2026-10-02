@@ -10,3 +10,9 @@ local.properties
 *.log
 .env
 captures/
+app/build/outputs/
+connected-logcat.txt
+emulator-final.png
+instrument-*.log
+shots*.txt
+morsel-screens*/

@@ -43,6 +43,24 @@ internal fun prepareDemo(graph: AppGraph, scenario: DemoScenario) {
 }
 
 /**
+ * Seeds demo mode for the adb-driven visual evidence block (run via
+ * `adb shell am instrument` by scripts/ci-emulator.sh; not part of the
+ * gradle suite).
+ */
+@RunWith(AndroidJUnit4::class)
+class VisualSetupTest {
+
+    private val context
+        get() = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test
+    fun seedDemoMode() = prepareDemo(
+        (context.applicationContext as MorselApplication).graph,
+        DemoScenario.SUCCESS_CORRELATED,
+    )
+}
+
+/**
  * Checkpoint review gate: a request left in flight when the card is dismissed
  * stays visible and blocking after reopening IN THE SAME PROCESS. The demo
  * TIMEOUT_UNKNOWN scenario drives the production coordinator (transport is
