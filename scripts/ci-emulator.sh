@@ -3,8 +3,9 @@
 #
 # Phase 1: full instrumented suite via gradle (AGP uninstalls the app
 #          afterwards, so nothing after this phase may assume gradle state;
-#          in-app screenshots survive via the /data/local/tmp mirror that
-#          Screenshots.kt writes during every capture).
+#          phase-1 in-app screenshots survive ONLY through the continuously
+#          streamed MORSEL_SHOT logcat mirror, read by two independent
+#          adb logcat readers).
 # Phase 2: visual evidence (light/dark/large-font/Dutch-locale-English/IME/reduced-motion)
 #          via adb, on a demo-mode card. Setup failures fail the phase —
 #          screenshots of the launcher are never accepted as evidence.
@@ -76,9 +77,14 @@ adb shell rm -rf /data/local/tmp/morsel-screens || true
 # (run 36979628029: a vold burst evicted every earlier capture), and the
 # in-app screenshots of the gradle phase cannot be re-pulled after gradle
 # uninstalls the app. The stream file carries every MORSEL_SHOT line ever
-# written.
+# written. TWO independent readers: logd dropped a 10-chunk window for one
+# reader mid-burst (run 36981516152 API 36, demo-unknown-unknown chunks
+# 422-431, silently, while other lines kept flowing) — the second stream is
+# an independent delivery path; the decoder merges both.
 adb logcat -v threadtime > connected-logcat-phase1-stream.log 2>&1 &
 LOGCAT_STREAMER_PID=$!
+adb logcat -v threadtime > connected-logcat-phase1-stream2.log 2>&1 &
+LOGCAT_STREAMER2_PID=$!
 
 # Phase 1: full suite (process-death pair, visual seed and visual-only
 # classes run in their own phases below so a real restart is never masked by
@@ -95,7 +101,9 @@ else
 fi
 
 kill "$LOGCAT_STREAMER_PID" 2>/dev/null || true
+kill "$LOGCAT_STREAMER2_PID" 2>/dev/null || true
 wait "$LOGCAT_STREAMER_PID" 2>/dev/null || true
+wait "$LOGCAT_STREAMER2_PID" 2>/dev/null || true
 
 # The APKs are needed for every adb-driven phase; gradle may have uninstalled
 # them after its run.
@@ -200,58 +208,9 @@ fi
 adb logcat -d > connected-logcat.txt || overall=1
 screenshot emulator-final.png || overall=1
 
-# In-app screenshots arrive through the MORSEL_SHOT logcat mirror; the mirror
-# lines are carried by the continuous phase-1 stream (rotation-proof) and both
-# ring-buffer dumps (deduplicated by the decoder). The run-as pull covers
-# anything that only exists after a later reinstall.
-mkdir -p morsel-screens
-for name in connected-logcat-phase1-stream.log connected-logcat.txt connected-logcat-phase1.txt; do
-    [ -f "$name" ] || continue
-    python3 - "$name" <<'PYEOF' || overall=1
-import base64
-import pathlib
-import re
-import sys
-
-shots = {}
-begin = re.compile(r"BEGIN:([A-Za-z0-9._-]+):(\d+)$")
-chunk = re.compile(r"CHUNK:([A-Za-z0-9._-]+):(\d+):([A-Za-z0-9+/=]+)$")
-for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
-    if "MORSEL_SHOT:" not in line:
-        continue
-    body = line.split("MORSEL_SHOT:", 1)[1].strip()
-    b = begin.match(body)
-    c = chunk.match(body)
-    if b:
-        shots[b.group(1)] = [""] * int(b.group(2))
-    elif c and c.group(1) in shots:
-        i = int(c.group(2))
-        if i < len(shots[c.group(1)]):
-            shots[c.group(1)][i] = c.group(3)
-    # END markers need no action: the shot is complete once all chunks arrived.
-out = pathlib.Path("morsel-screens")
-written = 0
-incomplete = 0
-for name, parts in shots.items():
-    target = out / f"{name}.png"
-    if not parts or any(p == "" for p in parts):
-        if not target.exists():
-            incomplete += 1
-            print(f"FAIL: incomplete logcat mirror for {name}", file=sys.stderr)
-        continue
-    data = base64.b64decode("".join(parts))
-    if not target.exists() or target.stat().st_size != len(data):
-        target.write_bytes(data)
-    written += 1
-print(f"logcat mirror [{sys.argv[1]}]: {written} complete, {incomplete} new incomplete")
-if incomplete:
-    sys.exit(1)
-if not shots:
-    print(f"FAIL: no MORSEL_SHOT mirror entries in {sys.argv[1]}", file=sys.stderr)
-    sys.exit(1)
-sys.exit(0)
-PYEOF
-done
+# The run-as pull covers anything that only exists in the app's current
+# install (later phases run on a reinstalled app). It runs BEFORE the merged
+# gate so a shot that arrived only this way counts as delivered.
 if adb shell run-as io.evren.morsel ls files/morsel-screens > shots.list 2> shots-err.txt; then
     tr -d '\r' < shots.list | while IFS= read -r f; do
         [ -n "$f" ] || continue
@@ -261,6 +220,61 @@ if adb shell run-as io.evren.morsel ls files/morsel-screens > shots.list 2> shot
 else
     echo "note: no in-app screenshot listing (run-as): $(cat shots-err.txt)" >&2
 fi
+
+# In-app screenshots arrive through the MORSEL_SHOT logcat mirror; the mirror
+# lines are carried by BOTH continuous phase-1 streams (independent logd
+# readers — one silently dropped a 10-chunk window in run 36981516152) and
+# both ring-buffer dumps. The decoder merges every source into one view and
+# the phase fails only for shots that arrived through none of them.
+mkdir -p morsel-screens
+python3 - connected-logcat-phase1-stream.log connected-logcat-phase1-stream2.log \
+    connected-logcat.txt connected-logcat-phase1.txt <<'PYEOF' || overall=1
+import base64
+import pathlib
+import re
+import sys
+
+shots = {}
+begin = re.compile(r"BEGIN:([A-Za-z0-9._-]+):(\d+)$")
+chunk = re.compile(r"CHUNK:([A-Za-z0-9._-]+):(\d+):([A-Za-z0-9+/=]+)$")
+for path in sys.argv[1:]:
+    if not pathlib.Path(path).exists():
+        continue
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if "MORSEL_SHOT:" not in line:
+            continue
+        body = line.split("MORSEL_SHOT:", 1)[1].strip()
+        b = begin.match(body)
+        c = chunk.match(body)
+        if b:
+            shots.setdefault(b.group(1), [""] * int(b.group(2)))
+        elif c and c.group(1) in shots:
+            i = int(c.group(2))
+            if i < len(shots[c.group(1)]):
+                shots[c.group(1)][i] = c.group(3)
+        # END markers need no action: the shot is complete once all chunks arrived.
+out = pathlib.Path("morsel-screens")
+written = 0
+incomplete = 0
+for name, parts in shots.items():
+    target = out / f"{name}.png"
+    if not parts or any(p == "" for p in parts):
+        if not target.exists():
+            incomplete += 1
+            print(f"FAIL: incomplete logcat mirror for {name} in every channel", file=sys.stderr)
+        continue
+    data = base64.b64decode("".join(parts))
+    if not target.exists() or target.stat().st_size != len(data):
+        target.write_bytes(data)
+    written += 1
+print(f"logcat mirror: {written} complete, {incomplete} with no complete channel")
+if incomplete:
+    sys.exit(1)
+if not shots:
+    print("FAIL: no MORSEL_SHOT mirror entries in any logcat source", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0)
+PYEOF
 ls -la morsel-screens/ morsel-screens-host/ >&2 || true
 
 exit "$overall"

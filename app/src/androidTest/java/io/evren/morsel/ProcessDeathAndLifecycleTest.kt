@@ -186,22 +186,26 @@ class InFlightDismissReopenTest {
             "reopened card never reached the foreground",
             awaitForeground("io.evren.morsel", 10_000),
         )
-        // Until.hasObject yields a Boolean: a plain not-found must FAIL the
-        // wait, not slip through a null-check that only catches timeouts.
         val unknown = context.getString(R.string.unknown_body)
-        assertTrue(
-            "reopened card does not show the UNKNOWN body " +
-                "(FeedViewModel println diagnostics in the logcat name the " +
-                "starved pipeline link when this fires)",
-            device.wait(Until.hasObject(By.text(unknown)), 10_000) == true,
-        )
+        // The reopened window must be polled through the compose rule: the
+        // rule overrides the PROCESS-WIDE window recomposer factory for the
+        // whole test (WindowRecomposerPolicy.withFactory), so the raw
+        // startActivity relaunch composes under the rule's
+        // TestMonotonicFrameClock — which only advances inside compose test
+        // APIs. A plain device.wait loop advances nothing, so the reopened
+        // card would show its one initial frame (the stateIn default) forever
+        // while the ViewModel provably emitted (runs 36981516152/36979628029).
+        // compose.waitUntil advances the clock per iteration; the observation
+        // itself stays UiAutomator, and a timeout still fails the test.
+        compose.waitUntil("reopened card shows the UNKNOWN body", 10_000) {
+            device.hasObject(By.text(unknown))
+        }
         assertEquals(pidBefore, android.os.Process.myPid())
         // Check status AND acknowledgement stay available for this outcome.
         val ackAvailable = context.getString(R.string.i_checked_the_feeder)
-        assertTrue(
-            "acknowledgement control not found after reopen",
-            device.wait(Until.hasObject(By.text(ackAvailable)), 5_000) == true,
-        )
+        compose.waitUntil("acknowledgement control visible after reopen", 5_000) {
+            device.hasObject(By.text(ackAvailable))
+        }
 
         // A user status check reconciles read-only; no second request may
         // appear while it runs or after it.
@@ -214,10 +218,12 @@ class InFlightDismissReopenTest {
             assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
             Thread.sleep(50)
         }
-        assertTrue(
-            "UNKNOWN panel vanished after a read-only status check",
-            device.wait(Until.hasObject(By.text(unknown)), 5_000) == true,
-        )
+        // Same clock-pumping requirement as the first UNKNOWN wait: the
+        // notice recomposition after the read-only check also needs a
+        // rule-driven frame; a timeout here fails the test loudly.
+        compose.waitUntil("UNKNOWN panel persists after status check", 5_000) {
+            device.hasObject(By.text(unknown))
+        }
         assertEquals(attemptsBefore + 1, graph.demoRepository.sendAttempts.get())
         Screenshots.capture("inflight-dismiss-reopen")
     }

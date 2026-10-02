@@ -1,6 +1,8 @@
 package io.evren.morsel
 
 import android.content.Intent
+import android.view.MotionEvent
+import android.view.Window
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -70,6 +72,25 @@ class FloatingWindowTest {
         return focused?.root?.packageName?.toString()
     }
 
+    /**
+     * The system-recorded frame of the morsel application window — the truth
+     * ACTION_OUTSIDE geometry is judged against. The accessibility ROOT bounds
+     * only describe the content inside the window; the frame can be larger by
+     * invisible margins (the transparent Box padding IS window surface).
+     */
+    private fun morselWindowFrame(): android.graphics.Rect? {
+        val windows = InstrumentationRegistry.getInstrumentation()
+            .uiAutomation.windows.orEmpty()
+            .filter {
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                    it.root?.packageName?.toString() == "io.evren.morsel"
+            }
+        val window = windows.firstOrNull { it.isFocused } ?: windows.firstOrNull() ?: return null
+        val frame = android.graphics.Rect()
+        window.getBoundsInScreen(frame)
+        return frame
+    }
+
     /** Home package as the system actually routes the Home press. */
     private fun goHomeAndWait(): String {
         device.pressHome()
@@ -84,7 +105,9 @@ class FloatingWindowTest {
         return homePackage
     }
 
-    private fun launchAndWaitForCard() {
+    private fun launchAndWaitForCard(): FeedPopupActivity {
+        val monitor = InstrumentationRegistry.getInstrumentation()
+            .addMonitor(FeedPopupActivity::class.java.name, null, false)
         context.startActivity(
             Intent(context, FeedPopupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
@@ -110,10 +133,16 @@ class FloatingWindowTest {
             "card window never reached card size (bounds=$bounds)",
             bounds != null && bounds.height() >= device.displayHeight / 4,
         )
+        val activity = monitor.waitForActivityWithTimeout(10_000)
+        assertNotNull("FeedPopupActivity instance never tracked by the monitor", activity)
+        return activity as FeedPopupActivity
     }
 
     /** Waits until the system's focused window belongs to the given package. */
-    private fun waitUntilForeground(homePackage: String): Boolean {
+    private fun waitUntilForeground(
+        homePackage: String,
+        extraDiag: (() -> String)? = null,
+    ): Boolean {
         // Two independent signals, either of which counts: the accessibility
         // window list (worked after BACK dismissals, but kept reporting the
         // just-finished Morsel window after an ACTION_OUTSIDE dismissal —
@@ -138,13 +167,18 @@ class FloatingWindowTest {
         throw AssertionError(
             "foreground never became $homePackage within 10s " +
                 "(last dumpsys focus=$sawDumpsys, last accessibility window=$sawAccessibility, " +
-                "uiautomator=${device.currentPackageName})",
+                "uiautomator=${device.currentPackageName})" +
+                (extraDiag?.invoke()?.let { " | $it" } ?: ""),
         )
     }
 
     /** Raw `mCurrentFocus=` line of the last dumpsys read, for diagnostics. */
     @Volatile
     private var lastFocusLine: String? = null
+
+    /** What the last dispatched touch event looked like to the activity. */
+    @Volatile
+    private var lastDispatchReport: String? = null
 
     /**
      * Package of the window the system currently gives input focus to, parsed
@@ -227,18 +261,87 @@ class FloatingWindowTest {
     @Test
     fun outsideTapDismissesWithoutTouchingWhatIsBeneath() {
         val homePackage = goHomeAndWait()
-        launchAndWaitForCard()
-        // Click just LEFT of the actual card window at mid height: (0,0) sits
-        // in the status bar and would pull down the notification shade.
-        val bounds = morselWindowBounds()
-        assertNotNull("Morsel window not found", bounds)
-        val x = (bounds!!.left - 8).coerceAtLeast(0)
-        val y = bounds.centerY().coerceIn(0, device.displayHeight - 1)
-        device.click(x, y)
+        val activity = launchAndWaitForCard()
+
+        // Measure everything the tap geometry depends on BEFORE tapping. Run
+        // 36981516152 proved the previous 8px-left-of-root tap landed INSIDE
+        // the invisible window margin (the transparent Box padding is real
+        // window surface): input focus never left the card, so all three
+        // focus signals honestly kept reporting io.evren.morsel for 10s, and
+        // no ACTION_OUTSIDE ever existed. The dim itself works — pixel
+        // comparison of the same run's captures measured exactly 0.24.
+        val attrs = activity.window.attributes
+        val decor = activity.window.decorView
+        val location = IntArray(2)
+        decor.getLocationOnScreen(location)
+        val root = morselWindowBounds()
+        val frame = morselWindowFrame()
+        val watchOutside =
+            (attrs.flags and android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH) != 0
+        val dimBehind =
+            (attrs.flags and android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0
+        val report =
+            "root=$root frame=$frame attrs(x=${attrs.x} y=${attrs.y} " +
+                "w=${attrs.width} h=${attrs.height}) " +
+                "decor=${decor.width}x${decor.height}@(${location[0]},${location[1]}) " +
+                "watchOutsideTouch=$watchOutside dimBehind=$dimBehind"
+        println("FloatingWindowTest: window geometry: $report")
+        assertNotNull("morsel window frame not found: $report", frame)
+        assertNotNull("morsel accessibility root not found: $report", root)
+
+        // Log every touch event the activity actually receives: if dismissal
+        // still fails, this is the ACTION_DOWN/ACTION_OUTSIDE delivery
+        // record that names the consumed link without another blind run.
+        val original = requireNotNull(activity.window.callback)
+        lastDispatchReport = null
+        activity.window.callback = object : Window.Callback by original {
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                val handled = original.dispatchTouchEvent(event)
+                lastDispatchReport =
+                    "action=${event.actionMasked} at (${event.rawX},${event.rawY}) " +
+                    "handled=$handled"
+                println("FloatingWindowTest: dispatchTouchEvent $lastDispatchReport")
+                return handled
+            }
+        }
+
+        // Tap in the middle of the gap between the measured window frame and
+        // the display edge — provably outside the frame and far from it, and
+        // away from the status bar / shade and the navigation bar.
+        val tapX: Int
+        val tapY: Int
+        when {
+            frame!!.left >= 40 -> {
+                tapX = frame.left / 2
+                tapY = frame.centerY().coerceIn(0, device.displayHeight - 1)
+            }
+            device.displayWidth - frame.right >= 40 -> {
+                tapX = (frame.right + device.displayWidth) / 2
+                tapY = frame.centerY().coerceIn(0, device.displayHeight - 1)
+            }
+            frame.top >= 240 -> {
+                tapX = frame.centerX()
+                tapY = frame.top / 2
+            }
+            else -> throw AssertionError("no measurable gap to tap into: $report")
+        }
         assertTrue(
-            "outside tap did not dismiss back to $homePackage",
-            waitUntilForeground(homePackage),
+            "chosen tap ($tapX,$tapY) is not outside the measured frame $frame / root $root",
+            !frame.contains(tapX, tapY) && !root!!.contains(tapX, tapY),
         )
+
+        device.click(tapX, tapY)
+        try {
+            assertTrue(
+                "outside tap did not dismiss back to $homePackage",
+                waitUntilForeground(homePackage) {
+                    "tap=($tapX,$tapY) $report lastDispatch=$lastDispatchReport " +
+                        "activityFinishing=${activity.isFinishing}"
+                },
+            )
+        } finally {
+            activity.window.callback = original
+        }
         // The home screen is foreground: the tap was absorbed by the dim layer,
         // never passed through to whatever sits beneath (no launcher surface
         // was replaced by another window either).
