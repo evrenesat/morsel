@@ -72,6 +72,19 @@ screenshot() {
 # Stale evidence from earlier runs on the same emulator must never mix in.
 adb shell rm -rf /data/local/tmp/morsel-screens || true
 
+# The in-app shell channel executes this helper via UiAutomation
+# .executeShellCommand, which on API 30 runs commands through Runtime.exec —
+# whitespace tokenization, NO shell parsing (quotes in an inline command are
+# unusable) — so the shell logic lives in this pushed script file. Pushed
+# fresh every run; a missing helper would silently kill the durable evidence
+# channel, so its failure fails the phase.
+if adb push scripts/copy-screenshot.sh /data/local/tmp/morsel-copy-screenshot.sh > /dev/null 2>&1; then
+    adb shell chmod 644 /data/local/tmp/morsel-copy-screenshot.sh || true
+else
+    echo "FAIL: could not push scripts/copy-screenshot.sh to the emulator" >&2
+    overall=1
+fi
+
 # Stream the logcat to disk continuously through phase 1: the ring buffer has
 # already rotated MORSEL_SHOT streams out mid-phase under system log storms
 # (run 36979628029: a vold burst evicted every earlier capture), and the
@@ -221,12 +234,24 @@ else
     echo "note: no in-app screenshot listing (run-as): $(cat shots-err.txt)" >&2
 fi
 
-# In-app screenshots arrive through the MORSEL_SHOT logcat mirror; the mirror
-# lines are carried by BOTH continuous phase-1 streams (independent logd
-# readers — one silently dropped a 10-chunk window in run 36981516152) and
-# both ring-buffer dumps. The decoder merges every source into one view and
-# the phase fails only for shots that arrived through none of them.
+# Shell-owned durable copies written at capture time (executeShellCommand runs
+# an actual sh, which owns /data/local/tmp; run-as inside it reads the app's
+# private files — see Screenshots.kt). They survive gradle's uninstall, so
+# phase-1 shots lost by logd from EVERY reader are still delivered here.
+# Pulled BEFORE the merged gate; sizes.list carries the expected exact sizes.
 mkdir -p morsel-screens
+if adb pull /data/local/tmp/morsel-screens/. morsel-screens/ > pull-shell.log 2>&1; then
+    ls -la morsel-screens/ >&2
+else
+    echo "note: no shell-owned screenshot copies: $(tail -1 pull-shell.log)" >&2
+fi
+
+# Merged evidence gate: a shot counts as delivered when its MORSEL_SHOT chunks
+# are complete in any logcat source, OR a file channel (shell-owned copy /
+# run-as pull) delivered it NONZERO at the EXACT size listed in sizes.list
+# (logd drops identical chunk windows for every reader under burst pressure —
+# runs 36981516152 and 36988504221 — so the durable file channel is what the
+# gate leans on; existence alone is never accepted as evidence).
 python3 - connected-logcat-phase1-stream.log connected-logcat-phase1-stream2.log \
     connected-logcat.txt connected-logcat-phase1.txt <<'PYEOF' || overall=1
 import base64
@@ -254,14 +279,33 @@ for path in sys.argv[1:]:
                 shots[c.group(1)][i] = c.group(3)
         # END markers need no action: the shot is complete once all chunks arrived.
 out = pathlib.Path("morsel-screens")
+sizes = {}
+sizes_list = out / "sizes.list"
+if sizes_list.exists():
+    for line in sizes_list.read_text(encoding="utf-8", errors="replace").splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1].isdigit():
+            sizes[fields[0]] = int(fields[1])
 written = 0
 incomplete = 0
 for name, parts in shots.items():
     target = out / f"{name}.png"
+    size = target.stat().st_size if target.exists() else -1
     if not parts or any(p == "" for p in parts):
-        if not target.exists():
+        # Incomplete mirror: only a file channel can still deliver this shot,
+        # and only at the exact nonzero size the capture verified (the capture
+        # writes sizes.list only after its shell copy passed wc -c).
+        expected = sizes.get(f"{name}.png")
+        delivered = size > 0 and expected is not None and size == expected
+        if delivered:
+            print(f"note: {name} delivered by file channel at exact size {size}")
+        else:
             incomplete += 1
-            print(f"FAIL: incomplete logcat mirror for {name} in every channel", file=sys.stderr)
+            print(
+                f"FAIL: no complete channel for {name} "
+                f"(mirror incomplete, file size {size}, expected {expected})",
+                file=sys.stderr,
+            )
         continue
     data = base64.b64decode("".join(parts))
     if not target.exists() or target.stat().st_size != len(data):

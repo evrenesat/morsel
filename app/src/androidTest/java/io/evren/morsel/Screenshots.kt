@@ -1,6 +1,8 @@
 package io.evren.morsel
 
+import android.app.UiAutomation
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
@@ -8,19 +10,28 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Saves screenshots into the app's INTERNAL files dir (pullable with run-as
- * for as long as the app stays installed) AND mirrors every capture into the
- * logcat buffer under [TAG]: Gradle uninstalls the app when its connected run
- * ends — wiping internal storage — so the logcat stream (captured continuously
- * by scripts/ci-emulator.sh, immune to buffer rotation) plus the run-as pull
- * are the two channels that carry evidence out.
+ * Saves screenshots into the app's INTERNAL files dir and carries them to the
+ * host through two channels:
  *
- * Logcat entries are capped at ~4KB, so the base64 body travels in numbered
- * chunks with BEGIN/END markers per screenshot, paced so logd cannot drop the
- * tail of a burst. The mirror is best-effort; a failure never fails the test
- * itself. (/data/local/tmp copies under adopted shell identity were tried and
- * do NOT work: the permission identity changes permission checks, not the
- * app's Linux UID, and /data/local/tmp is not writable by app UIDs.)
+ * 1. DURABLE: a real shell copy to /data/local/tmp/morsel-screens via
+ *    UiAutomation.executeShellCommand running the helper script
+ *    scripts/copy-screenshot.sh (pushed there by ci-emulator.sh). The shell
+ *    uid owns /data/local/tmp — unlike the app process, whose Linux UID
+ *    cannot write there even under adopted shell permission identity (DAC
+ *    checks use the effective uid, not the permission identity; that is why
+ *    the earlier in-process copy attempt silently produced nothing) — and
+ *    `run-as` inside the script reads the app-private file, so captures
+ *    survive gradle's post-suite uninstall. The helper validates the copy at
+ *    the exact nonzero byte count and lists verified copies in sizes.list
+ *    for the host-side gate. logd has provably dropped identical chunk
+ *    windows from EVERY reader under burst pressure (run 36988504221: both
+ *    continuous streams lost the same chunks), so logcat alone cannot be
+ *    the durability guarantee.
+ *
+ * 2. FALLBACK: the MORSEL_SHOT logcat mirror. Logcat entries are capped at
+ *    ~4KB, so the base64 body travels in numbered chunks with BEGIN/END
+ *    markers per screenshot, paced so logd cannot drop the tail of a burst.
+ *    The mirror is best-effort; a failure never fails the test itself.
  */
 object Screenshots {
 
@@ -31,6 +42,7 @@ object Screenshots {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val dir = File(context.filesDir, "morsel-screens")
         captureInto(dir, name)
+        copyViaShellChannel(context.packageName, dir, sanitize(name))
         mirrorViaLogcat(dir, name)
     }
 
@@ -42,6 +54,50 @@ object Screenshots {
         val out = File(dir, "$safe.png")
         FileOutputStream(out).use { shot.compress(Bitmap.CompressFormat.PNG, 100, it) }
         shot.recycle()
+    }
+
+    /**
+     * Copies one capture to /data/local/tmp through an actual shell script
+     * and verifies it at the exact byte count. The helper
+     * (scripts/copy-screenshot.sh, pushed by ci-emulator.sh) is executed as
+     * `sh /data/local/tmp/morsel-copy-screenshot.sh PACKAGE SAFE EXPECTED`:
+     * UiAutomationConnection on API 30 runs commands via Runtime.exec —
+     * whitespace tokenization, NO shell parsing — so an inline `sh -c`
+     * command would tokenize its quotes apart, and the pushed script file is
+     * the only reliable way to run real shell logic (mkdir, run-as redirect,
+     * exact-size validation). All arguments are whitespace-free by
+     * construction (SAFE is sanitized to [A-Za-z0-9._-]). The helper prints
+     * the verified size only on success; the comparison below gates the
+     * sizes.list confirmation for the host gate. Never fails the test: the
+     * host gate judges what arrived through any channel.
+     */
+    private fun copyViaShellChannel(packageName: String, dir: File, safe: String) {
+        runCatching {
+            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+            val expected = File(dir, "$safe.png").length()
+            val output = shellCommand(
+                automation,
+                "sh /data/local/tmp/morsel-copy-screenshot.sh $packageName $safe $expected",
+            )
+            val copied = output.trim().toLongOrNull()
+            if (copied != null && copied > 0 && copied == expected) {
+                println("Screenshots: shell copy verified $safe.png ($copied bytes)")
+            } else {
+                println(
+                    "Screenshots: shell copy failed for $safe.png: " +
+                        "output='$output' expected=$expected",
+                )
+            }
+        }.onFailure {
+            println("Screenshots: shell copy of $safe failed: $it")
+        }
+    }
+
+    /** Runs one command through UiAutomation's shell and returns its stdout. */
+    private fun shellCommand(automation: UiAutomation, command: String): String = automation.executeShellCommand(command).use { pfd ->
+        java.io.InputStreamReader(
+            ParcelFileDescriptor.AutoCloseInputStream(pfd),
+        ).useLines { lines -> lines.joinToString("\n") }
     }
 
     private fun mirrorViaLogcat(dir: File, rawName: String) {
