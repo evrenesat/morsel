@@ -2,67 +2,42 @@
 
 Worker: ZCode GLM-5.3-Flash on p100 (authorized). One implementation worker; supervising Codex chat reviews.
 
-## Checkpoints
+## Current state (after checkpoint-3 corrections, commit a8f9971)
 
-### Checkpoint 1 — bootstrap (this commit)
+All four review findings to date are fixed with regression tests; CI is green on the last reviewed commit.
 
-Done, verified locally on p100 (JDK 17.0.20, SDK platform 36 + build-tools 36.0.0):
+| Checkpoint | Commit | CI |
+|---|---|---|
+| Bootstrap (floating card, CI, contract docs) | a884040 | superseded |
+| Domain/data with fault gates (59 JVM tests) | 80f5d4d | superseded |
+| Full UI, art, EN/NL, accessibility, demo scenarios | b9ba545 | [36951136153](https://github.com/evrenesat/morsel/actions/runs/36951136153) green |
+| Checkpoint-2 storage fixes (DataStore extensions, trimming) | 67269e1 | [36951827220](https://github.com/evrenesat/morsel/actions/runs/36951827220) FAILED (scope-restart test bug) |
+| Fail-closed journal + storage-error gate | efc898d | [36955392704](https://github.com/evrenesat/morsel/actions/runs/36955392704) green, 77 unit tests |
+| Checkpoint-3 fixes + instrumented suite | a8f9971 | recorded below after completion |
 
-- Gradle 8.13 wrapper (distribution SHA256 pinned), AGP 8.13.2, Kotlin 2.2.21, Compose BOM 2026.06.01, all versions pinned in `gradle/libs.versions.toml`.
-- **Pin deviation, documented:** plan suggested OkHttp latest; `com.squareup.okhttp3:okhttp:5.5.0` (okhttp-android) requires compileSdk 37, incompatible with the pinned SDK 36 and AGP 8.13.2 max. Pinned **OkHttp 5.1.0** (newest line 5.x compatible with compileSdk 36). Only that pin changed.
-- Floating `FeedPopupActivity` (windowIsFloating theme, bounded 336dp card), original vector launcher icon, `allowBackup=false` with exclusion rules, GPL-3.0 LICENSE + NOTICE with upstream attribution.
-- `docs/api-contract.md`: protocol fields extracted from pinned upstream commit with permalinks + synthetic fixtures. Key finding: pinned source reads only `type`/`recordTime`/`actualGrainNum` from work records — **no request-ID correlation field exists in observed evidence**, so Morsel's reconciler will never convert time+amount alone into success; correlation code paths will be exercised via fake scenarios.
-- CI: `.github/workflows/ci.yml` (push main + PRs; spotlessCheck, lintDebug, testDebugUnitTest, assembleDebug; SDK 36 bootstrap; reports uploaded on failure; contents:read only; concurrency cancel; 45m timeout).
+## Review fixes applied
 
-Verification commands and results (local, p100):
+- **Checkpoint-2 (plans/review-checkpoint2.md)** — DataStore filenames end `.preferences_pb` (P1); trimming counts acknowledged entries as resolved and preserves genuinely unresolved ones (P2); zero-selection acceptance (fresh session starts at 0, empty cup, Feed disabled until plus) implemented and unit-tested (b9ba545/67269e1).
+- **CI 36951827220 root cause** — a new DataStore must not open a file until the previous store's scope is fully joined; tests now `cancelAndJoin` before reopening (efc898d). Regression kept.
+- **Journal corruption fail-closed (supervisor recovery prompt)** — removed `ReplaceFileCorruptionHandler`; undecodable payloads throw `JournalReadException` on read and refuse writes instead of silently resetting to empty state. `FeedCoordinator.restore` latches `storageError`; `submit` returns `Blocked(STORAGE_ERROR)` before any preflight traffic (asserted: zero transport calls). Card shows a clear EN/NL status with no Feed button (efc898d).
+- **Checkpoint-3 (plans/review-checkpoint3.md)** — blocked pre-send outcomes (offline, serial missing, wrong model, no binding, preflight failed, journal write failed) now show localized EN/NL notices saying nothing was sent; `checkStatus` READ_FAILED keeps the unresolved operation visible and explains itself; stale notices clear on a fresh attempt/acknowledgement. Caller cancellation after the durable dispatch records UNKNOWN via one bounded non-cancellable journal write and stays blocking; never retried, resolved outcomes never overwritten (a8f9971).
 
-```
-./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug
-BUILD SUCCESSFUL in 2m 12s (57 actionable tasks)
-```
-
-CI run: pending first push (link recorded after push).
-
-### Checkpoint 2 — domain/data layer with fault gates (this commit)
-
-Done, verified locally on p100:
-
-- `PetlibroClient` (strict envelope handling, single-shot write, redirects refused, finite timeouts, no logging of bodies), `PetlibroFeederRepository` (reads re-login once on 1009; write never retries), `AuthManager` + `CredentialStore`/`CredentialVault` (AES-GCM Keystore; instrumented Keystore tests still pending), `SettingsStore` + `DataStoreFeedJournal` (no-backup storage), `FeedCoordinator` (atomic dispatch guard, journal-before-write, restore DISPATCHING→UNKNOWN, read-only polling at 3/10/25 s with injectable timing), `HistoryReconciler` (correlation-only confirmation), `DemoFeederRepository` (six labelled scenarios, isolated from real journal/serial/credentials).
-- **59 JVM unit tests green**, covering the plan's unit gates: envelope shapes, MD5 Unicode, 0/17 rejection, exactly one write under 20 concurrent taps and under timeout/500/malformed/auth/disconnect faults, redirect refusal, journal failure before AND after the write, restore-never-resends, missing serial fail-closed, offline no delayed send, uncorrelated records never confirm, correlated mismatch no top-up, logout/rebind cannot bypass unresolved journal. Full-stack coordinator→client→MockWebServer tests included.
+## Test evidence (local, p100: JDK 17.0.x, SDK 36)
 
 ```
-./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug
-BUILD SUCCESSFUL in 1m 6s (60 actionable tasks); tests: 59 completed, 0 failed
+./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug assembleDebugAndroidTest
+BUILD SUCCESSFUL; unit tests: 85 completed, 0 failed (a8f9971)
 ```
 
-CI run: link recorded after push.
+Unit gates cover every fault path in plans/implementation.md including exact HTTP call counts; instrumented suite (production DataStore/Keystore/floating window/demo flows/failure text) compiles and runs in CI emulator jobs below.
 
-### Checkpoint 3 — complete UI, art, localization, demo scenarios (this commit)
+## CI pipeline (this commit)
 
-Done, verified locally on p100:
-
-- `FeedPopupActivity` hosts `FeedCard` (header with cat name/gear 48dp, original Canvas cat + cup art with independent ears/tail/eyes, blinking/attention/sending/waiting/happy/unsure moods, 48dp counter buttons, Feed N portions, honest status area, quiet footer), `SetupCard` (demo route without credentials; real sign-in with session-conflict note; discovery auto-binds exactly one PLAF108, multi requires explicit pick, zero shows setup message), `SettingsCard` (cat name, lower-only cap 1..16, haptics, reduce motion, demo scenario picker, sign out).
-- Application-scoped `AppGraph` behind `MorselGraph`/`FeedingCoordinator`/`MorselSettingsStore` interfaces; real and demo worlds share nothing (separate repositories, journals, serials).
-- ViewModel actions read cached source state (no stale-UI decisions); plus/minus never reach the coordinator; feed gating includes onboarding, unresolved ops, in-session success latch, demo-offline.
-- Full English + Dutch strings incl. plurals; TalkBack labels, live region status, decorative art excluded from semantics; reduce-motion setting + system animator scale 0 both freeze decorative animation.
-- Unit tests now 68 green (8 ViewModel tests added; all previous coordinator/client/fault gates intact).
-
-```
-./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug
-BUILD SUCCESSFUL in 1m 21s (60 actionable tasks); tests: 68 completed, 0 failed
-```
-
-CI run: link recorded after push.
-
-## Remaining
-
-- Step 2: protocol client, vault/stores, coordinator + journal, reconciler, unit-test gates (single-write under faults).
-- Step 3: full UI, artwork, en/nl, accessibility, demo scenarios.
-- Step 4: production client wiring behind explicit setup; demo isolation.
-- Step 5: emulator CI (API 30/36, no KVM on p100), release workflow + verify-apk.sh, unsigned release build until signing secrets exist.
-- Supervisor review, then signing key + secrets (owner/supervisor), then signed v0.1.0 prerelease.
+- `ci.yml`: static job (formatting, lint, unit tests, debug build) plus **emulator jobs on API 30 and API 36** (`reactivecircus/android-emulator-runner@v2`, KVM perms, no-window) running `connectedDebugAndroidTest`; XML/HTML reports, screenshots and sanitized logcat uploaded even on failure.
+- `release.yml` (not yet exercised — publishing awaits supervisor review): gates → signed `assembleRelease` using repository secrets `MORSEL_KEYSTORE_BASE64`, `MORSEL_STORE_PASSWORD`, `MORSEL_KEY_ALIAS`, `MORSEL_KEY_PASSWORD`, `MORSEL_CERT_SHA256`; keystore materialized only in runner temp and removed after; certificate pinned against `MORSEL_CERT_SHA256` before publishing; APK + `SHA256SUMS` attached as prerelease on `v*` tags; `scripts/verify-apk.sh` verifies package identity and certificate.
 
 ## Explicitly NOT done (truth)
 
 - Real Petlibro account, shared-account acceptance, physical dispensing, Galaxy S21/One UI behavior: NOT TESTED. No live API traffic has been generated.
-- No APK release published yet; per instruction the signed release waits for supervisor review and signing secrets.
+- No APK release published yet; per instruction the signed release waits for supervisor review (release workflow merged but unexercised).
+- Emulator CI results for a8f9971: recorded here with exact run links and numbers once the first emulator run completes.

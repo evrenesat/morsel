@@ -5,6 +5,10 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Release signing is env-driven: only CI (release workflow) provides the
+// keystore path and passwords, via runner-temp files. Local builds unsigned.
+val releaseStorePath: String? = System.getenv("MORSEL_STORE_FILE")
+
 android {
     namespace = "io.evren.morsel"
     compileSdk = 36
@@ -19,10 +23,25 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        create("release") {
+            if (releaseStorePath != null) {
+                storeFile = File(releaseStorePath)
+                storeType = "PKCS12"
+                storePassword = System.getenv("MORSEL_STORE_PASSWORD")
+                keyAlias = System.getenv("MORSEL_KEY_ALIAS")
+                keyPassword = System.getenv("MORSEL_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseStorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
