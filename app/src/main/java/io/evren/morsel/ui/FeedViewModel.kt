@@ -148,8 +148,37 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, FeedUiState())
 
     init {
+        // Sanitized diagnostics (no content): instrumented runs showed a
+        // reopened card rendering the default state while the coordinator
+        // provably held state; these lines make a starved collector visible
+        // in the next run's logcat (same precedent as AppGraph's mode-flag
+        // log). println reaches logcat (tag System.out) and stays JVM-test
+        // safe, unlike android.util.Log.
+        val createdWallMs = System.currentTimeMillis()
+        var loggedSettingsCollector = false
         viewModelScope.launch {
-            graph.settingsStore.settings.collect { latestSettings = it }
+            graph.settingsStore.settings.collect {
+                if (!loggedSettingsCollector) {
+                    loggedSettingsCollector = true
+                    println(
+                        "FeedViewModel: settings collector first emission " +
+                            "(${System.currentTimeMillis() - createdWallMs}ms after creation)",
+                    )
+                }
+                latestSettings = it
+            }
+        }
+        var loggedFirstUiState = false
+        viewModelScope.launch {
+            uiState.collect {
+                if (!loggedFirstUiState) {
+                    loggedFirstUiState = true
+                    println(
+                        "FeedViewModel: uiState first emission " +
+                            "(${System.currentTimeMillis() - createdWallMs}ms after creation, demo=${it.demoMode})",
+                    )
+                }
+            }
         }
         viewModelScope.launch {
             realCoordinator.state.collect { latestReal = it }

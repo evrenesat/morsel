@@ -7,6 +7,12 @@
 
     <style name="Theme.Morsel.Popup">
         <item name="android:windowIsFloating">true</item>
+        <!-- Inherited translucency makes the window span the whole display
+             (insets become nonzero inside it), so taps next to the card land
+             INSIDE the invisible full-screen window and ACTION_OUTSIDE never
+             fires - outside-tap dismissal cannot work. A floating card must
+             be a wrap-content window with the dim covering the rest. -->
+        <item name="android:windowIsTranslucent">false</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:backgroundDimEnabled">true</item>
