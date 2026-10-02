@@ -1,20 +1,30 @@
 # Morsel
-A small native Android floating card for selecting portions and explicitly requesting food from one Petlibro Air Smart Feeder (PLAF108).
 
-Implementation follows [the implementation plan](plans/implementation.md) and [status](docs/implementation-status.md). CI runs static checks, unit tests and a full instrumented suite on API 30/36 emulators with uploaded XML, screenshots and phase logs; visual acceptance evidence (light/dark/2x font/Dutch-locale-English/landscape/IME/reduced-motion) is captured on-device on every run. No physical feeder/account or Galaxy S21 validation has been performed.
+A small Android floating card for choosing portions and deliberately requesting food from one Petlibro Air Smart Feeder (PLAF108). Android 11 or newer; English-only UI.
 
-Kotlin, Jetpack Compose, OkHttp, coroutines and DataStore; Android 11+. One app module, no backend, Home Assistant, overlay permission, schedules or automatic feeding retries.
+## Install and try
 
-Public source and APK releases are authorized. GPL-3.0; protocol adaptation attribution must accompany releases.
+Download the signed **[Morsel v0.1.0 APK](https://github.com/evrenesat/morsel/releases/download/v0.1.0/app-release.apk)** from the [prerelease page](https://github.com/evrenesat/morsel/releases/tag/v0.1.0), open it on Android, and allow installation from your browser or file manager when Android asks. Open Morsel and choose **Try the demo** to explore without an account, network requests, or dispensing food.
 
-## Building and testing
+This is a software-tested prerelease. Real Petlibro sign-in, shared-account access, Galaxy S21 / One UI behavior, and physical feeding still need owner validation. Demo and emulator results do not prove that a real feeder dispensed food.
 
-Requirements: JDK 17, Android SDK platform 36 + build-tools 36.0.0 (or let CI provision them).
+Choose portions locally, then tap Feed once. Morsel does not queue or automatically repeat feeding requests. An uncertain result stays visible after reopening; check the feeder before acknowledging it and feeding again.
 
-```bash
+## Verification
+
+The [release workflow](https://github.com/evrenesat/morsel/actions/runs/36991746027) passed formatting, lint, 91 JVM tests, 17 instrumented tests on each of Android API 30 and 36, restart and visual checks, and installation/launch of the downloaded signed APK. See the [final review](docs/final-review.md), [testing notes](docs/testing.md), and [release verification and signing fingerprint](docs/release.md).
+
+## Development
+
+Kotlin, Jetpack Compose, OkHttp, coroutines and DataStore. One app module, no backend, overlay permission, scheduling, or automatic feeding retries.
+
+Requirements: JDK 17, Android SDK platform 36 and build-tools 36.0.0.
+
+~~~bash
 ./gradlew --no-daemon spotlessCheck lintDebug testDebugUnitTest assembleDebug
-./gradlew --no-daemon connectedDebugAndroidTest   # emulator/device needed
-```
+bash scripts/ci-emulator.sh  # connected emulator and Android SDK tools required
+~~~
 
-Install the debug APK on a device to try the app; use **Try the demo** on the setup card — the demo simulates a feeder with no account, no network and no food. See [docs/testing.md](docs/testing.md), [docs/privacy.md](docs/privacy.md) and [docs/release.md](docs/release.md). Release APKs are signed only in GitHub Actions; verify with `scripts/verify-apk.sh`.
+CI runs the API 30/36 emulator matrix with fake transports only and uploads reports/screenshots. Version tags run full CI before signing and publishing, then download and launch the published APK. Durable screenshot files survive test-app removal; logcat is a fallback.
 
+See [architecture](ARCHITECTURE.md), [privacy](docs/privacy.md), [implementation status](docs/implementation-status.md), and the [implementation plan](plans/implementation.md). GPL-3.0; see LICENSE and NOTICE for protocol attribution.

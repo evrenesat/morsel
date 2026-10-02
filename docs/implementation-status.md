@@ -2,9 +2,13 @@
 
 Worker: ZCode GLM-5.3-Flash on p100 (authorized). One implementation worker; supervising Codex chat reviews.
 
-## Current state (evidence-proven test synchronization fixes, commit 457f3ca + this commit)
+## Current state — software prerelease delivered, 2026-10-02
 
-Both remaining CI failures are root-caused from run 36981516152's artifacts (below) and fixed test-side with no production change. Emulator evidence (per-test screenshots, phase logs, dual logcat streams) is preserved and uploaded on every run; the next full CI matrix adjudicates.
+[Morsel v0.1.0](https://github.com/evrenesat/morsel/releases/tag/v0.1.0) is published from commit 814237673eb3ddaee21dd89414b638216215c85d. [Release CI 36991746027](https://github.com/evrenesat/morsel/actions/runs/36991746027) passed every job, including the downloaded APK's checksum, pinned signing certificate, installation, and emulator launch. The supervisor inspected the published launch screenshot and the preceding visual/test evidence. [Final review](final-review.md): No material findings.
+
+All app UI is English-only. Real account/shared access, S21/One UI, and physical feeder acceptance remain untested; no unattended dispensing occurred. The implementation worker finished and supervision can stop after recording this delivery.
+
+The following table is historical evidence, including superseded failures and the earlier rejected Dutch requirement.
 
 | Checkpoint / review | Commit | CI |
 |---|---|---|
@@ -42,7 +46,7 @@ Both remaining CI failures are root-caused from run 36981516152's artifacts (bel
 - Foreground detection after dismissals is dumpsys-based and working since 457f3ca (the ICU-regex parse bug is fixed); Back dismissals pass consistently.
 - Success attribution by current operation id (4aa782a) closed the stale-success latch; its JVM regressions and the on-device DemoUnconfirmedFlowTest pass.
 - English-only UI is proven on-device under a Dutch locale (`DutchLocaleEnglishUiTest`, per-app LocaleManager).
-- Evidence survives gradle's uninstall only via the logcat mirror; `/data/local/tmp` copies never worked (app-UID DAC) and are gone; phase-1 shots cannot be re-pulled after the phases 3–5 reinstall.
+- Evidence now survives Gradle uninstall through a shell-owned file copy made by the pushed helper; the former app-UID copy failed. Logcat is a fallback.
 - The earlier full-screen-window translucency hypothesis (runs 36971344588..36977619841) is superseded by the frame-margin finding above; earlier per-run narratives are in git history.
 
 ## What the on-device evidence changed (commit 49f05fa)
@@ -82,7 +86,6 @@ All app UI is English-only (plans/owner-english-only.md). The Dutch resource fil
 ## Explicitly NOT done (truth)
 
 - Real Petlibro account, shared-account acceptance, physical dispensing, Galaxy S21/One UI behavior: NOT TESTED. No live API traffic has been generated.
-- No APK release published; the signed release waits for supervisor review (workflow merged, unexercised).
 - plans/review-reopen-test.md is implemented and now has GREEN CI evidence (36986559378): ordinary dismissal/relaunch, no settings kick, UNKNOWN panel with check-status and acknowledgement on screen (evidence screenshot inspected).
 - The outside-tap dismissal is green on both APIs with the delivery log proving the mechanism (in-window DOWN/UP closed by the platform's UP-beyond-slop branch; the launcher never receives the tap).
 - Landscape and IME evidence exists as in-app screenshots; physical-device layout review is the supervisor's.

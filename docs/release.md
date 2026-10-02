@@ -33,3 +33,19 @@ Install a release APK over an existing install only when it is signed with the s
 ## Versioning
 
 `versionCode` must increase monotonically with every published APK (`app/build.gradle.kts`). Current: versionCode 1, versionName 0.1.0.
+
+## Verified v0.1.0 prerelease
+
+[Download APK and SHA256SUMS](https://github.com/evrenesat/morsel/releases/tag/v0.1.0). Source: 814237673eb3ddaee21dd89414b638216215c85d. [All release jobs passed](https://github.com/evrenesat/morsel/actions/runs/36991746027), including downloading the published artifact and launching it on a fresh emulator.
+
+APK SHA-256:
+~~~text
+55bef71b92a8787a1998e13f97ab581a0a6e63e2458281a8995bfeaa057dbc85
+~~~
+
+Signing certificate SHA-256:
+~~~text
+58:87:7F:B1:65:29:C3:06:6E:97:2F:A3:90:8E:76:0A:72:12:47:08:57:72:CA:27:98:86:D6:1A:BF:19:97:57
+~~~
+
+The supervisor independently verified the downloaded APK on p100 and inspected the release-emulator launch screenshot. This remains a prerelease pending the owner's account, S21, and supervised physical feeder validation.

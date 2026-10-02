@@ -48,3 +48,7 @@
 - Run 36988504221 proved logd can drop the SAME chunk windows from BOTH continuous streams (demo-success 257-273, demo-unknown 485 on API 36) - reader redundancy cannot fix evidence loss; app tests were green, only the evidence gate failed.
 - New durable capture channel per supervisor direction: scripts/copy-screenshot.sh pushed to /data/local/tmp, executed via UiAutomation.executeShellCommand (API 30 UiAutomationConnection uses Runtime.exec - whitespace tokenization, NO shell parsing - so the logic must be a pushed script, not an inline sh -c). Shell uid owns /data/local/tmp; run-as reads the app-private capture; exact byte-count validation recorded in sizes.list; ci-emulator.sh pulls the directory before the merged gate, which accepts incomplete-mirror shots only at the exact manifest size. Logcat mirror stays as fallback, timing unchanged; gates strict.
 - Decoder unit-tested locally: complete mirror / exact-size file / wrong size / missing manifest / zero size.
+
+## 2026-10-02 — signed software prerelease delivered
+
+Published v0.1.0 from 8142376 after final material review and full emulator gates. Release 36991746027 passed download checksum, pinned signature/package identity, installation and launch; supervisor verified the downloaded APK independently and inspected pixels. Documented remaining account/S21/physical feeder acceptance and English-only UI. No real dispensing.
