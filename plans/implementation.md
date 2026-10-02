@@ -1,5 +1,7 @@
 # Morsel: implementation-ready handoff
 
+> Owner correction, 2026-10-02: All app UI must be English-only. Dutch was an incorrect supervisor assumption. This overrides all EN/NL/Dutch requirements below and in earlier review plans. Implement plans/owner-english-only.md before release.
+
 ## Objective and delivery
 Build Morsel: on Android 11+, tapping the launcher icon opens a compact floating card over the real launcher; the user selects 0–16 portions locally and deliberately sends ONE request to one bound PLAF108 feeder. The app honestly separates cloud acceptance from physical completion. It includes a charming original fluffy cat, cup, kibble and bowl. Deliver public source at evrenesat/morsel, green CI, signed installable APK and test/review evidence.
 
