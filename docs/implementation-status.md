@@ -28,7 +28,7 @@ Both remaining CI failures are root-caused from run 36981516152's artifacts (bel
 | Working dumpsys parse; rotation-proof phase-1 logcat streamer; dead local-tmp channel removed; sharper VM diagnostics | 457f3ca | [36981516152](https://github.com/evrenesat/morsel/actions/runs/36981516152) FAILED exactly outsideTap + InFlight UNKNOWN on BOTH APIs, plus one incomplete API36 shot — both failures root-caused from its artifacts (below) |
 | Evidence-proven test synchronization: measured outside tap with delivery logging; compose-clock pumping for the raw-restart reopen; second logcat stream | 1ddf8ce | [36986559378](https://github.com/evrenesat/morsel/actions/runs/36986559378) GREEN — 17/17 BOTH APIs, 0 skipped, all evidence channels complete |
 | Mechanism-correction comments (input-surface close-on-touch, not ACTION_OUTSIDE); stream2 in upload paths | 14e6734 | [36988504221](https://github.com/evrenesat/morsel/actions/runs/36988504221) app tests green; API 36 evidence gate FAILED — logd dropped the SAME chunk windows from BOTH streams (demo-success 257-273, demo-unknown 485), proving reader redundancy cannot fix it |
-| Durable shell-channel capture: pushed copy-screenshot.sh executed via executeShellCommand (Runtime.exec tokenizes, no quotes), run-as redirect, exact-size sizes.list; host pulls /data/local/tmp before the merged gate | this commit | pending CI |
+| Durable shell-channel capture: pushed copy-screenshot.sh executed via executeShellCommand (Runtime.exec tokenizes, no quotes), run-as redirect, exact-size sizes.list; host pulls /data/local/tmp before the merged gate | 8142376 | [36990698354](https://github.com/evrenesat/morsel/actions/runs/36990698354) GREEN — 17/17 BOTH APIs, 0 skipped; durable channel already rescued reopened-same-process on API 36 (mirror incomplete, file channel delivered at exact size 654776); images inspected |
 
 ## What runs 36981516152 + 36986559378 proved (both failures root-caused and green since 1ddf8ce/36986559378)
 
@@ -64,6 +64,8 @@ shellcheck scripts/*.sh: clean
 ```
 
 CI [36986559378](https://github.com/evrenesat/morsel/actions/runs/36986559378) (1ddf8ce): static job green; emulator jobs green on API 30 and API 36 with 17/17 tests, 0 failures, 0 skipped (XML inspected); all 12 in-app shots complete on API 36 including the previously lost demo-unknown-unknown; five API 36 visual phases each `OK (1 test)`; both previously failing tests pass with their delivery/geometry logs in the logcat stream.
+
+CI [36990698354](https://github.com/evrenesat/morsel/actions/runs/36990698354) (8142376): all jobs green, 17/17 both APIs, 0 failures, 0 skipped (XML inspected); the durable channel rescued `reopened-same-process` on API 36 whose mirror was again incompletely delivered (exact size 654776 from sizes.list); 15 PNGs + sizes.list on API 36, 12 on API 30; demo-unknown-unknown and reopened evidence images inspected and correct.
 
 Unit gates cover every fault path in plans/implementation.md including exact HTTP call counts; instrumented tests run in CI emulator jobs (see table).
 
