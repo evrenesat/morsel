@@ -62,6 +62,20 @@ class FeedViewModelTest {
     }
 
     @Test
+    fun `fresh session starts at zero with feed disabled`() = runTest(dispatcher) {
+        runCurrent()
+        assertEquals(0, viewModel.uiState.value.selection)
+        assertFalse(viewModel.uiState.value.feedEnabled)
+        viewModel.selectMinus()
+        runCurrent()
+        assertEquals(0, viewModel.uiState.value.selection) // empty cup floor
+        viewModel.feed()
+        runCurrent()
+        assertEquals(0, real.submits)
+        assertEquals(0, demo.submits)
+    }
+
+    @Test
     fun `plus and minus never touch the coordinator`() = runTest(dispatcher) {
         runCurrent()
         viewModel.selectPlus()
@@ -70,18 +84,18 @@ class FeedViewModelTest {
         runCurrent()
         assertEquals(0, real.submits)
         assertEquals(0, demo.submits)
-        assertEquals(2, viewModel.uiState.value.selection)
+        assertEquals(1, viewModel.uiState.value.selection)
     }
 
     @Test
-    fun `selection clamps to one and the cap`() = runTest(dispatcher) {
+    fun `selection clamps to zero and the cap`() = runTest(dispatcher) {
         runCurrent()
         repeat(20) { viewModel.selectPlus() }
         runCurrent()
         assertEquals(16, viewModel.uiState.value.selection)
         repeat(30) { viewModel.selectMinus() }
         runCurrent()
-        assertEquals(1, viewModel.uiState.value.selection)
+        assertEquals(0, viewModel.uiState.value.selection)
     }
 
     @Test
@@ -97,6 +111,7 @@ class FeedViewModelTest {
     @Test
     fun `feed dispatches once with the current selection and blocks re-feed`() = runTest(dispatcher) {
         runCurrent()
+        viewModel.selectPlus()
         viewModel.selectPlus()
         viewModel.selectPlus()
         viewModel.feed()
@@ -131,6 +146,7 @@ class FeedViewModelTest {
         runCurrent()
         settingsFlow.value = settingsFlow.value.copy(demoMode = true)
         runCurrent()
+        viewModel.selectPlus()
         viewModel.feed()
         runCurrent()
         assertEquals(1, demo.submits)

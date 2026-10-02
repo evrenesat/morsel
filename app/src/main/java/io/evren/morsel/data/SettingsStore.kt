@@ -2,9 +2,11 @@ package io.evren.morsel.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.evren.morsel.demo.DemoScenario
@@ -61,8 +63,11 @@ class SettingsStore(
 ) : MorselSettingsStore {
 
     private val store: DataStore<androidx.datastore.preferences.core.Preferences> =
-        PreferenceDataStoreFactory.create(scope = scope) {
-            File(context.noBackupFilesDir, "morsel.settings_pb")
+        PreferenceDataStoreFactory.create(
+            scope = scope,
+            corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+        ) {
+            File(context.noBackupFilesDir, "morsel.settings.preferences_pb")
         }
 
     override val settings: Flow<MorselSettings> = store.data.map { prefs ->

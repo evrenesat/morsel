@@ -2,10 +2,12 @@ package io.evren.morsel.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.evren.morsel.domain.FeedJournal
@@ -62,15 +64,35 @@ private fun JournalEntry.toOperation(): FeedOperation = FeedOperation(
  * outcome are each persisted in one atomic edit; logout, rebinding and settings
  * changes never delete it.
  */
-class DataStoreFeedJournal(
-    context: Context,
+class DataStoreFeedJournal private constructor(
+    fileProvider: () -> File,
     scope: CoroutineScope,
 ) : FeedJournal {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val store: DataStore<Preferences> = PreferenceDataStoreFactory.create(scope = scope) {
-        File(context.noBackupFilesDir, "morsel.journal_pb")
+    private val store: DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        scope = scope,
+        corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+        produceFile = fileProvider,
+    )
+
+    /** Device path: the journal lives in no-backup storage. */
+    constructor(context: Context, scope: CoroutineScope) : this(
+        { File(context.noBackupFilesDir, JOURNAL_FILE) },
+        scope,
+    )
+
+    /** Directory-injected path for JVM tests of the real persistence code. */
+    internal constructor(directory: File, scope: CoroutineScope) : this(
+        { File(directory, JOURNAL_FILE) },
+        scope,
+    )
+
+    private companion object {
+        private const val JOURNAL_FILE = "morsel.journal.preferences_pb"
+        private val KEY_OPERATIONS = stringPreferencesKey("operations")
+        private const val MAX_ENTRIES = 25
     }
 
     override suspend fun all(): List<FeedOperation> {
@@ -100,16 +122,26 @@ class DataStoreFeedJournal(
         }
     }
 
-    /** Bounded history: never drop unresolved entries; drop oldest resolved first. */
+    /**
+     * Bounded history: genuinely unresolved entries (unresolved state AND not
+     * acknowledged) are always kept; the resolved tail is bounded. Acknowledged
+     * entries count as resolved — an unbounded unresolved partition would
+     * eventually break the takeLast bound below.
+     */
     private fun trimmed(entries: List<JournalEntry>): List<JournalEntry> {
         if (entries.size <= MAX_ENTRIES) return entries
-        val unresolved = entries.filter { FeedState.valueOf(it.state).unresolvedState }
-        val resolved = entries.filterNot { FeedState.valueOf(it.state).unresolvedState }
-        return unresolved + resolved.takeLast(MAX_ENTRIES - unresolved.size)
+        val (unresolved, resolved) = entries.partition { it.genuinelyUnresolved() }
+        val keepResolved = if (unresolved.size >= MAX_ENTRIES) {
+            emptyList()
+        } else {
+            resolved.takeLast(MAX_ENTRIES - unresolved.size)
+        }
+        // Never grow beyond the bound; unresolved entries are bounded by
+        // dropping the OLDEST beyond the cap only if they alone exceed it.
+        val boundedUnresolved =
+            if (unresolved.size > MAX_ENTRIES) unresolved.takeLast(MAX_ENTRIES) else unresolved
+        return boundedUnresolved + keepResolved
     }
 
-    companion object {
-        private val KEY_OPERATIONS = stringPreferencesKey("operations")
-        private const val MAX_ENTRIES = 25
-    }
+    private fun JournalEntry.genuinelyUnresolved(): Boolean = FeedState.valueOf(state).unresolvedState && acknowledgedAtEpochMs == null
 }

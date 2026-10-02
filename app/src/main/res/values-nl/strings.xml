@@ -12,6 +12,7 @@
         <item quantity="one">%d portie</item>
         <item quantity="other">%d porties</item>
     </plurals>
+    <string name="feed_button_idle">Voeren</string>
     <plurals name="feed_button">
         <item quantity="one">%d portie geven</item>
         <item quantity="other">%d porties geven</item>

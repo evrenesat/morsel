@@ -12,6 +12,7 @@
         <item quantity="one">%d portion</item>
         <item quantity="other">%d portions</item>
     </plurals>
+    <string name="feed_button_idle">Feed</string>
     <plurals name="feed_button">
         <item quantity="one">Feed %d portion</item>
         <item quantity="other">Feed %d portions</item>

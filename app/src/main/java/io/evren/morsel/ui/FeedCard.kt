@@ -240,7 +240,7 @@ private fun CounterRow(
         CounterButton(
             label = stringResource(R.string.a11y_minus),
             symbol = stringResource(R.string.minus_symbol),
-            enabled = enabled && state.selection > FeedState.MIN_PORTIONS,
+            enabled = enabled && state.selection > 0,
             onClick = {
                 haptic(HapticFeedbackType.TextHandleMove)
                 onMinus()
@@ -399,10 +399,10 @@ private fun FeedButton(state: FeedUiState, onFeed: () -> Unit) {
             .testTag(Tags.FEED),
     ) {
         Text(
-            if (state.demoOffline) {
-                stringResource(R.string.demo_offline_button)
-            } else {
-                pluralStringResource(R.plurals.feed_button, state.selection, state.selection)
+            when {
+                state.demoOffline -> stringResource(R.string.demo_offline_button)
+                state.selection == 0 -> stringResource(R.string.feed_button_idle)
+                else -> pluralStringResource(R.plurals.feed_button, state.selection, state.selection)
             },
         )
     }

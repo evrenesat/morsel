@@ -55,11 +55,12 @@ fun CupScene(
     )
     Canvas(modifier = modifier.clearAndSetSemantics {}) {
         drawCupBody(cup, cupRim)
-        val pouring = motion && state == CupState.POURING
-        val grainCount = portions.coerceIn(1, 16)
-        drawKibblePile(kibble, kibbleDark, grainCount, shake = if (pouring) pourPhase else 0f)
+        val pouring = motion && state == CupState.POURING && portions > 0
+        if (portions > 0) {
+            drawKibblePile(kibble, kibbleDark, portions, shake = if (pouring) pourPhase else 0f)
+        }
         if (pouring) {
-            drawStream(kibble, pourPhase, grainCount)
+            drawStream(kibble, pourPhase, portions)
         }
     }
 }

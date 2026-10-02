@@ -55,7 +55,7 @@ data class FeedUiState(
     val screen: CardScreen = CardScreen.FEED,
     val setup: SetupState = SetupState.Welcome,
     val coordinator: CoordinatorState = CoordinatorState(),
-    val selection: Int = 1,
+    val selection: Int = 0,
     val demoMode: Boolean = false,
     /** Success observed in this session (never from a restored journal). */
     val successThisSession: Boolean = false,
@@ -65,8 +65,10 @@ data class FeedUiState(
     val canChangeSelection: Boolean
         get() = !coordinator.dispatching && !coordinator.blocksNewSubmissions
 
+    /** Zero means nothing selected yet: the Feed button stays disabled. */
     val feedEnabled: Boolean
-        get() = canChangeSelection && !successThisSession && !demoOffline
+        get() = canChangeSelection && !successThisSession && !demoOffline &&
+            selection in FeedState.MIN_PORTIONS..minOf(cap, FeedState.ABSOLUTE_MAX_PORTIONS)
 
     val unresolved: FeedOperation? get() = coordinator.unresolvedOperation
 
@@ -84,7 +86,7 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
 
     private val screen = MutableStateFlow(CardScreen.FEED)
     private val setup = MutableStateFlow<SetupState>(SetupState.Welcome)
-    private val selection = MutableStateFlow(1)
+    private val selection = MutableStateFlow(0)
     private val successThisSession = MutableStateFlow(false)
 
     // Latest source values, maintained by collectors so action decisions never
@@ -168,7 +170,9 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
         val coordinator = if (latestSettings.demoMode) latestDemo else latestReal
         if (coordinator.dispatching || coordinator.blocksNewSubmissions) return
         val max = minOf(latestSettings.portionCap, FeedState.ABSOLUTE_MAX_PORTIONS)
-        selection.value = (selection.value + delta).coerceIn(FeedState.MIN_PORTIONS, max)
+        // Zero (empty cup, nothing selected) is the floor; the write itself
+        // only ever accepts 1..cap.
+        selection.value = (selection.value + delta).coerceIn(0, max)
     }
 
     /** The deliberate action. Duplicate taps are ignored by the coordinator. */
@@ -177,10 +181,14 @@ class FeedViewModel(private val graph: MorselGraph) : ViewModel() {
         val coordinator = if (latestSettings.demoMode) latestDemo else latestReal
         val demoOffline = latestSettings.demoMode &&
             latestSettings.demoScenario == DemoScenario.OFFLINE.name
-        val allowed = onboarded && !coordinator.dispatching && !coordinator.blocksNewSubmissions &&
-            !successThisSession.value && !demoOffline && screen.value == CardScreen.FEED
-        if (!allowed) return
         val portions = selection.value
+        val allowed = onboarded && !coordinator.dispatching && !coordinator.blocksNewSubmissions &&
+            !successThisSession.value && !demoOffline && screen.value == CardScreen.FEED &&
+            portions in FeedState.MIN_PORTIONS..minOf(
+                latestSettings.portionCap,
+                FeedState.ABSOLUTE_MAX_PORTIONS,
+            )
+        if (!allowed) return
         dispatchMadeThisSession = true
         viewModelScope.launch {
             val result = (if (latestSettings.demoMode) demoCoordinator else realCoordinator).submit(portions)
